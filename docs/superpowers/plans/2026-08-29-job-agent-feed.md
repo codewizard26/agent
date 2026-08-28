@@ -15,6 +15,8 @@
 - **Node 20+**, pnpm 9+. All packages `"type": "module"`.
 - **Greenhouse post dates read `first_published`, never `updated_at`.** `updated_at` reflects edits; using it reports stale jobs as fresh. This is the single most important correctness rule in the codebase.
 - **Ashby carries `dateFidelity: 'none'`** and is excluded from time-framed fetches. It appears only when the time frame is "any".
+- **Three date-fidelity levels.** `'true'` = a machine-readable creation field. `'reported'` = a date a model read off a page (web-search results) — allowed in time-framed fetches but labelled distinctly in the UI. `'none'` = no date at all.
+- **X/Twitter is not ingested directly.** `api.twitter.com/2/tweets/search/recent` returns 401 unauthenticated and the free tier carries no search endpoint. X hiring posts are reached only as indexed pages through the web-search adapter (Task 16).
 - **Nothing is hardcoded to a person.** Seniority band, core stack, and geography posture derive from `parsed_profile`. Two seeded profiles exercise opposite seniority.
 - **Model IDs live only in `packages/core/src/models.ts`.** Exact strings, no date suffixes: `claude-opus-5`, `claude-haiku-4-5`. Never `claude-haiku-4-5-20251001`.
 - **Structured model output uses `client.messages.parse()` with `zodOutputFormat`.** Never hand-parse JSON from a text block.
@@ -44,6 +46,9 @@ job-agent/
 │   │   ├── src/adapters/arbeitnow.ts
 │   │   ├── src/adapters/ashby.ts
 │   │   ├── src/adapters/hn.ts
+│   │   ├── src/adapters/web-search.ts Claude web_search — Google + X/Twitter posts
+│   │   ├── src/adapters/bluesky.ts    hiring posts via app-password auth
+│   │   ├── src/adapters/discover.ts   grows boards.yaml from company names
 │   │   ├── src/adapters/index.ts      registry + capped fan-out
 │   │   ├── src/filter.ts              profile-derived Tier 1
 │   │   ├── src/rank.ts                Claude ranking
@@ -323,12 +328,18 @@ export type SourceKind =
   | "ashby"
   | "remoteok"
   | "arbeitnow"
-  | "hn";
+  | "hn"
+  | "websearch"
+  | "bluesky";
 
 export type AtsKind = "greenhouse" | "lever" | "ashby" | "workable";
 
-/** 'true' = a real creation date. 'none' = the source exposes no date at all. */
-export type DateFidelity = "true" | "none";
+/**
+ * 'true'     — a machine-readable creation field from the source.
+ * 'reported' — a date a model read off a page. Usable, but not a real field.
+ * 'none'     — the source exposes no date at all.
+ */
+export type DateFidelity = "true" | "reported" | "none";
 
 export interface JobKey {
   /** Exact ATS identity, e.g. "greenhouse:discord/8599937002". Null when unknown. */
@@ -3420,6 +3431,834 @@ git commit -m "feat: next.js dashboard with streaming fetch and ranked results"
 
 ---
 
+### Task 16: Web-search adapter — Google reach, and the only route to X/Twitter posts
+
+Claude's `web_search` server tool runs the search on Anthropic's infrastructure, so this needs no Google API key and no second vendor. It is also the only viable path to X/Twitter hiring posts: `api.twitter.com/2/tweets/search/recent` returns **401** unauthenticated and X's free tier has no search endpoint, so X posts are reached as indexed pages rather than through their API.
+
+**Files:**
+- Create: `packages/core/src/adapters/web-search.ts`
+- Test: `packages/core/src/adapters/web-search.test.ts`
+
+**Interfaces:**
+- Consumes: `RANK_MODEL`, `UTILITY_MODEL`, `buildJobKey`, `ParsedProfile`, `NormalizedJob`.
+- Produces: `buildSearchQueries(profile: ParsedProfile, timeFrameDays: number | null): string[]`, `fetchViaWebSearch(profile: ParsedProfile, timeFrameDays: number | null, client: Anthropic): Promise<NormalizedJob[]>`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/core/src/adapters/web-search.test.ts`:
+
+```typescript
+import { describe, it, expect, vi } from "vitest";
+import { buildSearchQueries, fetchViaWebSearch } from "./web-search.js";
+import { deriveTitleKeywords } from "../resume.js";
+import type { ParsedProfile } from "../resume.js";
+
+const profile: ParsedProfile = {
+  fullName: "Nikhil Mishra",
+  yearsExperience: 5,
+  graduationYear: 2023,
+  seniorityBands: ["mid", "senior"],
+  coreStack: ["TypeScript", "React", "Next.js"],
+  bonusStack: ["Solidity"],
+  ...deriveTitleKeywords(["mid", "senior"]),
+};
+
+describe("buildSearchQueries", () => {
+  it("includes a general remote job query using the core stack", () => {
+    const queries = buildSearchQueries(profile, 7);
+    expect(queries.some((q) => q.includes("TypeScript"))).toBe(true);
+  });
+
+  it("includes X and Twitter site queries for hiring posts", () => {
+    const queries = buildSearchQueries(profile, 7);
+    expect(queries.some((q) => q.includes("site:x.com"))).toBe(true);
+    expect(queries.some((q) => q.includes("site:twitter.com"))).toBe(true);
+  });
+
+  it("uses the profile's own seniority words, not fixed ones", () => {
+    const grad = { ...profile, ...deriveTitleKeywords(["entry", "junior"]) };
+    const queries = buildSearchQueries(grad, 7);
+    expect(queries.join(" ")).toContain("new grad");
+    expect(queries.join(" ")).not.toContain("principal");
+  });
+
+  it("names the recency window in the query text", () => {
+    expect(buildSearchQueries(profile, 1).join(" ")).toMatch(/24 hours|past day/i);
+    expect(buildSearchQueries(profile, null).join(" ")).not.toMatch(/past day/i);
+  });
+});
+
+describe("fetchViaWebSearch", () => {
+  function fakeClient(searchText: string, extracted: unknown) {
+    return {
+      messages: {
+        create: vi.fn().mockResolvedValue({
+          content: [{ type: "text", text: searchText }],
+        }),
+        parse: vi.fn().mockResolvedValue({ parsed_output: extracted }),
+      },
+    } as never;
+  }
+
+  const oneJob = {
+    jobs: [
+      {
+        company: "Acme Robotics",
+        title: "Senior Full Stack Engineer",
+        location: "Remote (worldwide)",
+        remote: true,
+        applyUrl: "https://acme.example/jobs/42",
+        postedAtIso: "2026-08-27",
+        sourcePage: "https://x.com/acmerobotics/status/1",
+      },
+    ],
+  };
+
+  it("marks web-search results as reported fidelity, not true", async () => {
+    const jobs = await fetchViaWebSearch(
+      profile,
+      7,
+      fakeClient("found some jobs", oneJob),
+    );
+    expect(jobs[0]!.dateFidelity).toBe("reported");
+  });
+
+  it("uses the reported date when the model supplies one", async () => {
+    const jobs = await fetchViaWebSearch(profile, 7, fakeClient("x", oneJob));
+    expect(jobs[0]!.postedAt?.toISOString().slice(0, 10)).toBe("2026-08-27");
+  });
+
+  it("falls back to no date when the reported date is unparseable", async () => {
+    const jobs = await fetchViaWebSearch(
+      profile,
+      7,
+      fakeClient("x", {
+        jobs: [{ ...oneJob.jobs[0], postedAtIso: "sometime recently" }],
+      }),
+    );
+    expect(jobs[0]!.postedAt).toBeNull();
+    expect(jobs[0]!.dateFidelity).toBe("none");
+  });
+
+  it("drops entries with no apply url", async () => {
+    const jobs = await fetchViaWebSearch(
+      profile,
+      7,
+      fakeClient("x", { jobs: [{ ...oneJob.jobs[0], applyUrl: "" }] }),
+    );
+    expect(jobs).toHaveLength(0);
+  });
+
+  it("declares the web_search server tool on the search call", async () => {
+    const client = fakeClient("x", oneJob);
+    await fetchViaWebSearch(profile, 7, client);
+    const call = (client as unknown as {
+      messages: { create: { mock: { calls: unknown[][] } } };
+    }).messages.create.mock.calls[0]![0] as { tools: { type: string }[] };
+    expect(call.tools[0]!.type).toBe("web_search_20260209");
+  });
+
+  it("returns an empty list rather than throwing when extraction fails", async () => {
+    const client = {
+      messages: {
+        create: vi.fn().mockResolvedValue({ content: [{ type: "text", text: "x" }] }),
+        parse: vi.fn().mockResolvedValue({ parsed_output: null }),
+      },
+    } as never;
+    expect(await fetchViaWebSearch(profile, 7, client)).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `pnpm vitest run packages/core/src/adapters/web-search.test.ts`
+Expected: FAIL — cannot resolve `./web-search.js`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `packages/core/src/adapters/web-search.ts`:
+
+```typescript
+import type Anthropic from "@anthropic-ai/sdk";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { z } from "zod";
+import { buildJobKey } from "../job-key.js";
+import { RANK_MODEL, UTILITY_MODEL } from "../models.js";
+import type { ParsedProfile } from "../resume.js";
+import type { NormalizedJob } from "../types.js";
+
+const FoundJobsSchema = z.object({
+  jobs: z.array(
+    z.object({
+      company: z.string(),
+      title: z.string(),
+      location: z.string(),
+      remote: z.boolean(),
+      applyUrl: z.string(),
+      /** ISO date if the page stated one, else an empty string. */
+      postedAtIso: z.string(),
+      sourcePage: z.string(),
+    }),
+  ),
+});
+
+function recencyPhrase(timeFrameDays: number | null): string {
+  if (timeFrameDays === null) return "";
+  if (timeFrameDays <= 1) return " posted in the past 24 hours";
+  return ` posted in the past ${timeFrameDays} days`;
+}
+
+/**
+ * Search queries derived from the profile — never a fixed list. The site: queries
+ * are the only route to X/Twitter hiring posts, since X's API requires a paid tier.
+ */
+export function buildSearchQueries(
+  profile: ParsedProfile,
+  timeFrameDays: number | null,
+): string[] {
+  const stack = profile.coreStack.slice(0, 4).join(" ");
+  const seniority = profile.titlesAccept.slice(0, 3).join(" OR ");
+  const recency = recencyPhrase(timeFrameDays);
+
+  return [
+    `remote ${seniority} full stack developer jobs ${stack}${recency}`,
+    `site:x.com "we're hiring" OR "we are hiring" ${stack} remote${recency}`,
+    `site:twitter.com "hiring" full stack engineer ${stack} remote${recency}`,
+    `"now hiring" remote full stack ${stack} apply${recency}`,
+  ];
+}
+
+/**
+ * Two calls by design: one search call that reads the web, then one extraction
+ * call that structures what it found. Keeping them separate avoids relying on
+ * an undocumented interaction between server tools and output_config.format.
+ */
+export async function fetchViaWebSearch(
+  profile: ParsedProfile,
+  timeFrameDays: number | null,
+  client: Anthropic,
+): Promise<NormalizedJob[]> {
+  const queries = buildSearchQueries(profile, timeFrameDays);
+
+  const search = await client.messages.create({
+    model: RANK_MODEL,
+    max_tokens: 16000,
+    thinking: { type: "adaptive" },
+    tools: [{ type: "web_search_20260209", name: "web_search", max_uses: 8 }],
+    messages: [
+      {
+        role: "user",
+        content:
+          "Search the web for currently-open job postings matching this " +
+          `candidate. Run these searches:\n${queries.map((q) => `- ${q}`).join("\n")}\n\n` +
+          "For each real posting you find, note the company, exact role title, " +
+          "location, whether it is remote, the direct application URL, the date " +
+          "it was posted if the page states one, and the page you found it on. " +
+          "Skip aggregator index pages, listicles, and posts that are not a " +
+          "specific open role.\n\nCANDIDATE\n" +
+          `Target seniority: ${profile.seniorityBands.join(", ")}\n` +
+          `Core stack: ${profile.coreStack.join(", ")}`,
+      },
+    ],
+  });
+
+  const findings = search.content
+    .filter((b): b is Anthropic.TextBlock => b.type === "text")
+    .map((b) => b.text)
+    .join("\n");
+
+  if (!findings.trim()) return [];
+
+  const extraction = await client.messages.parse({
+    model: UTILITY_MODEL,
+    max_tokens: 8192,
+    output_config: { format: zodOutputFormat(FoundJobsSchema), effort: "low" },
+    messages: [
+      {
+        role: "user",
+        content:
+          "Convert these search findings into structured job rows. Use an empty " +
+          "string for postedAtIso when no date was stated — do not guess one.\n\n" +
+          findings,
+      },
+    ],
+  });
+
+  const found = extraction.parsed_output;
+  if (!found) return [];
+
+  return found.jobs
+    .filter((j) => j.applyUrl && j.company && j.title)
+    .map((j): NormalizedJob => {
+      const parsedDate = j.postedAtIso ? new Date(j.postedAtIso) : null;
+      const validDate =
+        parsedDate && !Number.isNaN(parsedDate.getTime()) ? parsedDate : null;
+      return {
+        key: buildJobKey({
+          company: j.company,
+          title: j.title,
+          atsKind: null,
+          atsRef: null,
+        }),
+        sourceKind: "websearch",
+        company: j.company,
+        title: j.title,
+        locationRaw: j.location,
+        remote: j.remote,
+        descriptionText: `Found via web search on ${j.sourcePage}`,
+        applyUrl: j.applyUrl,
+        atsKind: null,
+        atsRef: null,
+        postedAt: validDate,
+        // A date read off a page is weaker evidence than a machine field.
+        dateFidelity: validDate ? "reported" : "none",
+      };
+    });
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pnpm vitest run packages/core/src/adapters/web-search.test.ts`
+Expected: PASS — 10 tests passed.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/core/src/adapters/web-search.ts packages/core/src/adapters/web-search.test.ts
+git commit -m "feat: web-search adapter covering google reach and x/twitter posts"
+```
+
+---
+
+### Task 17: Bluesky hiring-post adapter
+
+Verified: `public.api.bsky.app/xrpc/app.bsky.feed.searchPosts` returns **403** unauthenticated, but `bsky.social/xrpc/com.atproto.server.createSession` responds correctly (`AuthenticationRequired` on bad credentials), so a free account plus an app password unlocks search. This is the social source that actually works without a paid tier.
+
+**Files:**
+- Create: `packages/core/src/adapters/bluesky.ts`
+- Test: `packages/core/src/adapters/bluesky.test.ts`
+
+**Interfaces:**
+- Consumes: `UTILITY_MODEL`, `buildJobKey`, `ParsedProfile`, `NormalizedJob`.
+- Produces: `createBlueskySession(identifier: string, appPassword: string): Promise<string>`, `searchBlueskyPosts(accessJwt: string, query: string, limit?: number): Promise<BlueskyPost[]>`, `parseBlueskyPost(post: BlueskyPost, client: Anthropic): Promise<NormalizedJob | null>`, `buildBlueskyQueries(profile: ParsedProfile): string[]`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/core/src/adapters/bluesky.test.ts`:
+
+```typescript
+import { describe, it, expect, vi } from "vitest";
+import {
+  parseBlueskyPost,
+  buildBlueskyQueries,
+  type BlueskyPost,
+} from "./bluesky.js";
+import { deriveTitleKeywords } from "../resume.js";
+import type { ParsedProfile } from "../resume.js";
+
+const profile: ParsedProfile = {
+  fullName: "Nikhil Mishra",
+  yearsExperience: 5,
+  graduationYear: 2023,
+  seniorityBands: ["mid", "senior"],
+  coreStack: ["TypeScript", "React"],
+  bonusStack: [],
+  ...deriveTitleKeywords(["mid", "senior"]),
+};
+
+const post: BlueskyPost = {
+  uri: "at://did:plc:abc/app.bsky.feed.post/xyz",
+  author: { handle: "acme.bsky.social", displayName: "Acme Robotics" },
+  record: {
+    text: "We're hiring a Senior Full Stack Engineer, fully remote. TypeScript + React. Apply: https://acme.example/jobs/42",
+    createdAt: "2026-08-27T10:00:00.000Z",
+    facets: [
+      {
+        features: [
+          { $type: "app.bsky.richtext.facet#link", uri: "https://acme.example/jobs/42" },
+        ],
+      },
+    ],
+  },
+};
+
+function fakeClient(parsed: unknown) {
+  return {
+    messages: { parse: vi.fn().mockResolvedValue({ parsed_output: parsed }) },
+  } as never;
+}
+
+const hiring = {
+  isHiringPost: true,
+  company: "Acme Robotics",
+  title: "Senior Full Stack Engineer",
+  location: "Remote",
+  remote: true,
+  applyUrl: "https://acme.example/jobs/42",
+};
+
+describe("buildBlueskyQueries", () => {
+  it("derives queries from the profile stack and seniority", () => {
+    const queries = buildBlueskyQueries(profile);
+    expect(queries.join(" ")).toContain("TypeScript");
+    expect(queries.some((q) => q.includes("hiring"))).toBe(true);
+  });
+});
+
+describe("parseBlueskyPost", () => {
+  it("builds a normalized job from a hiring post", async () => {
+    const job = await parseBlueskyPost(post, fakeClient(hiring));
+    expect(job).not.toBeNull();
+    expect(job!.company).toBe("Acme Robotics");
+    expect(job!.sourceKind).toBe("bluesky");
+  });
+
+  it("uses the post createdAt as a true post date", async () => {
+    const job = await parseBlueskyPost(post, fakeClient(hiring));
+    expect(job!.dateFidelity).toBe("true");
+    expect(job!.postedAt?.toISOString()).toBe("2026-08-27T10:00:00.000Z");
+  });
+
+  it("prefers a facet link over the model's applyUrl", async () => {
+    const job = await parseBlueskyPost(
+      post,
+      fakeClient({ ...hiring, applyUrl: "https://wrong.example" }),
+    );
+    expect(job!.applyUrl).toBe("https://acme.example/jobs/42");
+  });
+
+  it("drops posts the model says are not hiring posts", async () => {
+    const job = await parseBlueskyPost(
+      post,
+      fakeClient({ ...hiring, isHiringPost: false }),
+    );
+    expect(job).toBeNull();
+  });
+
+  it("drops hiring posts that carry no application link at all", async () => {
+    const linkless: BlueskyPost = {
+      ...post,
+      record: { ...post.record, facets: [] },
+    };
+    const job = await parseBlueskyPost(
+      linkless,
+      fakeClient({ ...hiring, applyUrl: "" }),
+    );
+    expect(job).toBeNull();
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `pnpm vitest run packages/core/src/adapters/bluesky.test.ts`
+Expected: FAIL — cannot resolve `./bluesky.js`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `packages/core/src/adapters/bluesky.ts`:
+
+```typescript
+import type Anthropic from "@anthropic-ai/sdk";
+import { zodOutputFormat } from "@anthropic-ai/sdk/helpers/zod";
+import { z } from "zod";
+import { buildJobKey } from "../job-key.js";
+import { UTILITY_MODEL } from "../models.js";
+import type { ParsedProfile } from "../resume.js";
+import type { NormalizedJob } from "../types.js";
+
+export interface BlueskyPost {
+  uri: string;
+  author: { handle: string; displayName?: string };
+  record: {
+    text: string;
+    createdAt: string;
+    facets?: { features: { uri?: string }[] }[];
+  };
+}
+
+const HiringPostSchema = z.object({
+  isHiringPost: z.boolean(),
+  company: z.string(),
+  title: z.string(),
+  location: z.string(),
+  remote: z.boolean(),
+  applyUrl: z.string(),
+});
+
+/** Exchanges an app password for a session token. Create the app password in Bluesky settings. */
+export async function createBlueskySession(
+  identifier: string,
+  appPassword: string,
+): Promise<string> {
+  const res = await fetch("https://bsky.social/xrpc/com.atproto.server.createSession", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ identifier, password: appPassword }),
+  });
+  if (!res.ok) throw new Error(`bluesky auth: HTTP ${res.status}`);
+  const body = (await res.json()) as { accessJwt: string };
+  return body.accessJwt;
+}
+
+export async function searchBlueskyPosts(
+  accessJwt: string,
+  query: string,
+  limit = 50,
+): Promise<BlueskyPost[]> {
+  const url = new URL("https://bsky.social/xrpc/app.bsky.feed.searchPosts");
+  url.searchParams.set("q", query);
+  url.searchParams.set("limit", String(limit));
+  url.searchParams.set("sort", "latest");
+
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessJwt}` } });
+  if (!res.ok) throw new Error(`bluesky search: HTTP ${res.status}`);
+  const body = (await res.json()) as { posts?: BlueskyPost[] };
+  return body.posts ?? [];
+}
+
+export function buildBlueskyQueries(profile: ParsedProfile): string[] {
+  const stack = profile.coreStack.slice(0, 3);
+  return [
+    `hiring remote ${stack[0] ?? "developer"}`,
+    `"we're hiring" full stack ${stack[1] ?? "react"}`,
+    `hiring ${profile.seniorityBands[0] ?? "senior"} engineer remote`,
+  ];
+}
+
+/** First link in the post's facets — more reliable than a URL the model retyped. */
+function firstLink(post: BlueskyPost): string | null {
+  for (const facet of post.record.facets ?? []) {
+    for (const feature of facet.features) {
+      if (feature.uri) return feature.uri;
+    }
+  }
+  return null;
+}
+
+export async function parseBlueskyPost(
+  post: BlueskyPost,
+  client: Anthropic,
+): Promise<NormalizedJob | null> {
+  const response = await client.messages.parse({
+    model: UTILITY_MODEL,
+    max_tokens: 1024,
+    output_config: { format: zodOutputFormat(HiringPostSchema), effort: "low" },
+    messages: [
+      {
+        role: "user",
+        content:
+          "Does this Bluesky post advertise a specific open job? Set isHiringPost " +
+          "false for job seekers, commentary, or general company news. Use empty " +
+          "strings for anything not stated.\n\n" +
+          `Author: ${post.author.displayName ?? post.author.handle}\n${post.record.text}`,
+      },
+    ],
+  });
+
+  const parsed = response.parsed_output;
+  if (!parsed?.isHiringPost || !parsed.company || !parsed.title) return null;
+
+  const applyUrl = firstLink(post) ?? parsed.applyUrl;
+  if (!applyUrl) return null;
+
+  return {
+    key: buildJobKey({
+      company: parsed.company,
+      title: parsed.title,
+      atsKind: null,
+      atsRef: null,
+    }),
+    sourceKind: "bluesky",
+    company: parsed.company,
+    title: parsed.title,
+    locationRaw: parsed.location,
+    remote: parsed.remote,
+    descriptionText: post.record.text,
+    applyUrl,
+    atsKind: null,
+    atsRef: null,
+    postedAt: new Date(post.record.createdAt),
+    dateFidelity: "true",
+  };
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pnpm vitest run packages/core/src/adapters/bluesky.test.ts`
+Expected: PASS — 6 tests passed.
+
+- [ ] **Step 5: Wire both new sources into the fetch route**
+
+In `apps/web/app/api/fetch/route.ts`, add to the imports:
+
+```typescript
+import {
+  fetchViaWebSearch,
+  createBlueskySession,
+  searchBlueskyPosts,
+  buildBlueskyQueries,
+  parseBlueskyPost,
+} from "@job-agent/core";
+```
+
+Then append to the `sources` array, after the `hn` entry:
+
+```typescript
+    {
+      kind: "websearch" as const,
+      run: (): Promise<NormalizedJob[]> =>
+        fetchViaWebSearch(profile.parsedProfile as never, timeFrameDays, client),
+    },
+```
+
+And, guarded so a missing credential disables the source rather than failing the fetch:
+
+```typescript
+  if (process.env.BLUESKY_IDENTIFIER && process.env.BLUESKY_APP_PASSWORD) {
+    sources.push({
+      kind: "bluesky" as const,
+      run: async (): Promise<NormalizedJob[]> => {
+        const token = await createBlueskySession(
+          process.env.BLUESKY_IDENTIFIER!,
+          process.env.BLUESKY_APP_PASSWORD!,
+        );
+        const queries = buildBlueskyQueries(profile.parsedProfile as never);
+        const batches = await Promise.all(
+          queries.map((q) => searchBlueskyPosts(token, q).catch(() => [])),
+        );
+        const parsed = await Promise.all(
+          batches.flat().map((p) => parseBlueskyPost(p, client).catch(() => null)),
+        );
+        return parsed.filter((j): j is NormalizedJob => j !== null);
+      },
+    });
+  }
+```
+
+- [ ] **Step 6: Verify end to end**
+
+```bash
+export BLUESKY_IDENTIFIER="<your handle>.bsky.social"
+export BLUESKY_APP_PASSWORD="<app password from Bluesky settings>"
+pnpm --filter @job-agent/web dev
+```
+
+Expected: the progress log now reports more sources, and results include cards with source `websearch` and `bluesky`. Web-search cards show "date reported by page" rather than a hard date.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/core/src/adapters/bluesky.ts packages/core/src/adapters/bluesky.test.ts apps/web/app/api/fetch/route.ts
+git commit -m "feat: bluesky hiring-post adapter, wire web-search into fetch route"
+```
+
+---
+
+### Task 18: Board-token discovery
+
+Every company name the aggregators and web search surface is a candidate board token. Probing 200-vs-404 turns those names into new sources, which is how `boards.yaml` grows past its seed without hand-curation.
+
+**Files:**
+- Create: `packages/core/src/adapters/discover.ts`
+- Create: `apps/web/scripts/discover.ts`
+- Test: `packages/core/src/adapters/discover.test.ts`
+
+**Interfaces:**
+- Consumes: `BoardsConfig`, `mapWithConcurrency`.
+- Produces: `candidateTokens(companyName: string): string[]`, `probeBoardToken(provider: "greenhouse" | "lever" | "ashby", token: string): Promise<boolean>`, `discoverBoards(companyNames: string[], existing: BoardsConfig, probe?: ProbeFn): Promise<BoardsConfig>`.
+
+- [ ] **Step 1: Write the failing test**
+
+Create `packages/core/src/adapters/discover.test.ts`:
+
+```typescript
+import { describe, it, expect, vi } from "vitest";
+import { candidateTokens, discoverBoards } from "./discover.js";
+
+const empty = { greenhouse: [], lever: [], ashby: [] };
+
+describe("candidateTokens", () => {
+  it("lowercases and strips punctuation and spaces", () => {
+    expect(candidateTokens("Acme Robotics, Inc.")).toContain("acmerobotics");
+  });
+
+  it("offers a hyphenated variant too", () => {
+    expect(candidateTokens("Acme Robotics")).toContain("acme-robotics");
+  });
+
+  it("drops corporate suffixes", () => {
+    const tokens = candidateTokens("Acme Labs Ltd");
+    expect(tokens).toContain("acmelabs");
+  });
+});
+
+describe("discoverBoards", () => {
+  it("adds tokens that probe successfully", async () => {
+    const probe = vi.fn(async (provider: string, token: string) =>
+      provider === "greenhouse" && token === "acme",
+    );
+    const result = await discoverBoards(["Acme"], empty, probe);
+    expect(result.greenhouse).toContain("acme");
+    expect(result.lever).toEqual([]);
+  });
+
+  it("never duplicates a token already present", async () => {
+    const probe = vi.fn(async () => true);
+    const result = await discoverBoards(["Acme"], { ...empty, greenhouse: ["acme"] }, probe);
+    expect(result.greenhouse.filter((t) => t === "acme")).toHaveLength(1);
+  });
+
+  it("skips probing companies already known on some provider", async () => {
+    const probe = vi.fn(async () => true);
+    await discoverBoards(["Acme"], { ...empty, lever: ["acme"] }, probe);
+    expect(probe).not.toHaveBeenCalledWith("greenhouse", "acme");
+  });
+
+  it("treats a probe failure as a miss rather than throwing", async () => {
+    const probe = vi.fn(async () => {
+      throw new Error("network");
+    });
+    const result = await discoverBoards(["Acme"], empty, probe);
+    expect(result.greenhouse).toEqual([]);
+  });
+});
+```
+
+- [ ] **Step 2: Run it to verify it fails**
+
+Run: `pnpm vitest run packages/core/src/adapters/discover.test.ts`
+Expected: FAIL — cannot resolve `./discover.js`.
+
+- [ ] **Step 3: Write the implementation**
+
+Create `packages/core/src/adapters/discover.ts`:
+
+```typescript
+import { mapWithConcurrency, type BoardsConfig } from "./index.js";
+
+export type Provider = "greenhouse" | "lever" | "ashby";
+export type ProbeFn = (provider: Provider, token: string) => Promise<boolean>;
+
+const PROVIDERS: Provider[] = ["greenhouse", "lever", "ashby"];
+const SUFFIXES = /\b(inc|llc|ltd|limited|corp|corporation|gmbh|labs?|technologies|tech|pvt)\b/gi;
+
+/** Plausible board tokens for a company name — providers use varied conventions. */
+export function candidateTokens(companyName: string): string[] {
+  const cleaned = companyName.replace(SUFFIXES, " ").replace(/[^a-zA-Z0-9\s]/g, " ");
+  const words = cleaned.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return [];
+  return [...new Set([words.join(""), words.join("-"), words[0]!])];
+}
+
+/** A 200 means the board exists; a 404 means this company is not on this provider. */
+export async function probeBoardToken(
+  provider: Provider,
+  token: string,
+): Promise<boolean> {
+  const url =
+    provider === "greenhouse"
+      ? `https://boards-api.greenhouse.io/v1/boards/${token}/jobs`
+      : provider === "lever"
+        ? `https://api.lever.co/v0/postings/${token}?mode=json`
+        : `https://jobs.ashbyhq.com/${token}`;
+  const res = await fetch(url, { method: "GET" });
+  return res.ok;
+}
+
+export async function discoverBoards(
+  companyNames: string[],
+  existing: BoardsConfig,
+  probe: ProbeFn = probeBoardToken,
+): Promise<BoardsConfig> {
+  const known = new Set([...existing.greenhouse, ...existing.lever, ...existing.ashby]);
+  const result: BoardsConfig = {
+    greenhouse: [...existing.greenhouse],
+    lever: [...existing.lever],
+    ashby: [...existing.ashby],
+  };
+
+  const attempts = companyNames
+    .flatMap(candidateTokens)
+    .filter((token) => !known.has(token))
+    .flatMap((token) => PROVIDERS.map((provider) => ({ provider, token })));
+
+  const settled = await mapWithConcurrency(attempts, 10, async ({ provider, token }) => {
+    return { provider, token, hit: await probe(provider, token) };
+  });
+
+  for (const outcome of settled) {
+    // A network failure is a miss, not a crash — discovery is best-effort.
+    if (outcome.status !== "fulfilled" || !outcome.value.hit) continue;
+    const { provider, token } = outcome.value;
+    if (known.has(token)) continue;
+    result[provider].push(token);
+    known.add(token);
+  }
+
+  return result;
+}
+```
+
+- [ ] **Step 4: Run tests to verify they pass**
+
+Run: `pnpm vitest run packages/core/src/adapters/discover.test.ts`
+Expected: PASS — 7 tests passed.
+
+- [ ] **Step 5: Write the discovery script**
+
+Create `apps/web/scripts/discover.ts`:
+
+```typescript
+import fs from "node:fs";
+import path from "node:path";
+import { stringify } from "yaml";
+import { loadBoards, discoverBoards, fetchRemoteOk, fetchArbeitnow } from "@job-agent/core";
+
+const boardsPath = path.join(process.cwd(), "..", "..", "sources", "boards.yaml");
+const existing = loadBoards(fs.readFileSync(boardsPath, "utf8"));
+
+const [remoteok, arbeitnow] = await Promise.all([
+  fetchRemoteOk().catch(() => []),
+  fetchArbeitnow().catch(() => []),
+]);
+
+const companies = [
+  ...new Set([
+    ...remoteok.map((r) => r.company).filter((c): c is string => Boolean(c)),
+    ...arbeitnow.map((r) => r.company_name),
+  ]),
+];
+
+console.log(`probing ${companies.length} company names…`);
+const grown = await discoverBoards(companies, existing);
+
+const added =
+  grown.greenhouse.length - existing.greenhouse.length +
+  (grown.lever.length - existing.lever.length) +
+  (grown.ashby.length - existing.ashby.length);
+
+fs.writeFileSync(boardsPath, stringify(grown));
+console.log(`added ${added} board tokens; boards.yaml updated`);
+```
+
+- [ ] **Step 6: Run discovery for real**
+
+Run: `pnpm --filter @job-agent/web exec tsx scripts/discover.ts`
+Expected: prints how many company names were probed and how many tokens were added, then `boards.yaml` contains more entries than the seed list. Inspect the diff before committing — a bogus token costs a wasted request per fetch.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add packages/core/src/adapters/discover.ts packages/core/src/adapters/discover.test.ts apps/web/scripts/discover.ts sources/boards.yaml
+git commit -m "feat: board-token discovery from aggregator company names"
+```
+
+---
+
 ## Self-Review Notes
 
 Checked against the spec:
@@ -3434,4 +4273,10 @@ Checked against the spec:
 - §11 (testing) — Tasks 2–14; live canary is Task 14.
 - §12 (error handling) — Task 9 `mapWithConcurrency`, Task 12 batch isolation, Task 13 all-sources-failed error event.
 
+- Web search covering Google reach and X/Twitter posts — Task 16.
+- Bluesky hiring posts — Task 17.
+- Board-token discovery (spec §5, "that 200-vs-404 response is itself a discovery mechanism") — Task 18.
+
 Not covered here, by design: §6 and §9 (apply flow, fillers, worker) are in `2026-08-29-job-agent-apply.md`. The `answer_bank` table is created in Task 3 but not populated until that plan.
+
+**Type consistency check.** `DateFidelity` gained `'reported'` in Task 2 and is produced only by Task 16; Task 11's filter needs no change, because a `'reported'` job carries a real `postedAt` and passes the same date branch as `'true'`. `SourceKind` gained `websearch` and `bluesky` in Task 2 and both are used in Tasks 16-17 and the Task 17 route wiring. `mapWithConcurrency` (Task 9) is reused unchanged by Task 18.
