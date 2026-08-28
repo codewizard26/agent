@@ -90,9 +90,11 @@ Cloudflare interstitial. It fills every field it has an answer for, uploads the 
 scrolls to the submit control, and hands the tab over. The user clicks submit and solves a
 CAPTCHA tile if one appears.
 
-The schema carries a per-adapter `submitMode: 'auto' | 'assisted'`. Every adapter ships as
-`assisted`. If a provider is later found ungated, that adapter flips to `auto` with no
-structural change.
+The schema carries a per-adapter `submitMode: 'auto' | 'assisted'`. In cycle 1 every
+adapter is `assisted` and the worker never clicks submit — the field exists so that an
+ungated provider discovered later becomes a data change rather than a rewrite. Honouring
+`auto` is itself a cycle-2 decision, and would additionally require the profile's
+`auto_submit_authorized` to be true.
 
 ## 6. Architecture
 
@@ -274,6 +276,33 @@ the tracker never contains a fabricated submission.
 Fillers are per-ATS modules (`greenhouse.ts`, `lever.ts`, `ashby.ts`, `workable.ts`) with a
 shared `AtsFiller` interface. An `apply_url` matching no known filler produces a task that
 opens the page and reports every field as blocked — still useful, just not filled.
+
+## 8.5 Dashboard and the "Find jobs" action
+
+The dashboard opens on a profile switcher — two cards, one per resume. Selecting a profile
+scopes everything below it.
+
+**"Find jobs relevant to my resume"** starts a `run` and streams progress back to the page
+so the search is visible rather than a spinner:
+
+```
+fetching 6 sources … 3,140 postings … 214 new … filtered to 118 … ranking …
+```
+
+The run re-ingests only if the warehouse is older than 6 hours; otherwise it goes straight
+to Tier 1 and Tier 2 for that profile, so repeat clicks return in seconds.
+
+```
+runs
+  id, profile_id nullable, kind ('ingest'|'rank'|'discover'),
+  status ('running'|'ok'|'partial'|'failed'), stats jsonb,
+  started_at, finished_at, error
+```
+
+Results render as ranked cards: score, `why`, red flags, company, title, location, source,
+age, and the actions `Apply`, `Star`, `Dismiss`. Filters: tier, source, age, and state.
+Job state is stored per profile per job, so the same posting can be `applied` for one
+profile and `new` for the other.
 
 ## 9. Testing
 
