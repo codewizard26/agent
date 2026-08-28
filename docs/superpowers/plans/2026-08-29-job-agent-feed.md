@@ -722,13 +722,19 @@ curl -s "https://boards-api.greenhouse.io/v1/boards/discord/jobs?content=true" \
   > packages/core/src/adapters/fixtures/greenhouse-discord.json
 ```
 
-Confirm it contains `first_published`:
+Confirm it contains `first_published`, and — this matters — that at least one job has `first_published` **different from** `updated_at`:
 
 ```bash
-grep -c first_published packages/core/src/adapters/fixtures/greenhouse-discord.json
+node -e '
+const jobs = require("./packages/core/src/adapters/fixtures/greenhouse-discord.json").jobs;
+const differing = jobs.filter(j => j.first_published && j.updated_at && j.first_published !== j.updated_at);
+console.log(`${jobs.length} jobs, ${differing.length} with differing dates`);
+'
 ```
 
-Expected: a count greater than 0.
+Expected: a non-zero count in the second number.
+
+**If the count is zero**, hand-edit one row in the committed fixture so its `updated_at` is later than its `first_published`. This is a committed fixture — pinned test data, not a live sample — and the test below is the only thing standing between the codebase and the silent freshness lie described in Global Constraints. A test that can pass vacuously because of what a board happened to contain on capture day is not a guard.
 
 - [ ] **Step 2: Write the failing test**
 
@@ -2814,7 +2820,13 @@ export * from "./adapters/ashby.js";
 export * from "./adapters/remoteok.js";
 export * from "./adapters/arbeitnow.js";
 export * from "./adapters/hn.js";
+export * from "./adapters/web-search.js";
+export * from "./adapters/bluesky.js";
+export * from "./adapters/discover.js";
+export * from "./answers.js";
 ```
+
+Three of those modules are created in Tasks 16-18 and `answers.ts` in the apply plan's Task 1. Export them now: Task 17 Step 5 and the apply plan's Task 8 both import from `@job-agent/core`, and a missing export line surfaces as an unresolved import several tasks later, far from its cause. Until those files exist the `tsc` build will flag them — create empty placeholder modules if that blocks you, or add each line as its task lands.
 
 - [ ] **Step 4: Run tests to verify they pass**
 

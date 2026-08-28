@@ -10,7 +10,7 @@
 
 **Spec:** `docs/superpowers/specs/2026-08-29-job-agent-design.md` (§6, §8, §9)
 
-**Prerequisite:** `2026-08-29-job-agent-feed.md` complete through Task 15. This plan restarts task numbering at 1.
+**Prerequisite:** `2026-08-29-job-agent-feed.md` complete through **Task 18**, not Task 15. Feed Task 17 Step 5 edits `apps/web/app/api/fetch/route.ts`, and this plan edits the same app — running the two plans interleaved produces conflicting edits to that file. Order is: feed 1-18, then apply 1-8. This plan restarts task numbering at 1.
 
 ## Global Constraints
 
@@ -824,6 +824,26 @@ describe("harvestFields", () => {
     const labels = (await harvestFields(page)).map((f) => f.label.toLowerCase());
     expect(labels.some((l) => l.includes("why do you want to work"))).toBe(true);
   });
+
+  it("is idempotent — a second harvest yields selectors pointing at the same labels", async () => {
+    await loadFixture("greenhouse-gitlab");
+    const first = await harvestFields(page);
+    const second = await harvestFields(page);
+
+    expect(second.map((f) => f.selector)).toEqual(first.map((f) => f.selector));
+    expect(second.map((f) => f.label)).toEqual(first.map((f) => f.label));
+  });
+
+  it("leaves no duplicate markers after repeated harvests", async () => {
+    await loadFixture("greenhouse-gitlab");
+    await harvestFields(page);
+    await harvestFields(page);
+    const markers = await page.locator("[data-job-agent]").count();
+    const harvested = (await harvestFields(page)).filter((f) =>
+      f.selector.startsWith("[data-job-agent"),
+    ).length;
+    expect(markers).toBe(harvested);
+  });
 });
 ```
 
@@ -909,6 +929,14 @@ export async function harvestFields(page: Page): Promise<HarvestedField[]> {
       return `[data-job-agent="${index}"]`;
     }
 
+    // Clear markers from any earlier harvest. Without this, a re-harvest
+    // reassigns indices from zero while stale attributes survive, and a
+    // selector captured in the first pass silently resolves to a different
+    // element in the second — a mis-fill no assertion would catch.
+    document
+      .querySelectorAll("[data-job-agent]")
+      .forEach((e) => e.removeAttribute("data-job-agent"));
+
     const elements = Array.from(
       document.querySelectorAll<HTMLElement>("input, textarea, select"),
     );
@@ -946,7 +974,7 @@ export async function harvestFields(page: Page): Promise<HarvestedField[]> {
 - [ ] **Step 5: Run tests to verify they pass**
 
 Run: `pnpm vitest run apps/worker/src/harvest.test.ts`
-Expected: PASS — 6 tests passed.
+Expected: PASS — 8 tests passed.
 
 - [ ] **Step 6: Commit**
 
@@ -1908,5 +1936,7 @@ Checked against the spec:
 - §12 (stuck-task recovery) — Task 8 reclaims `opening`/`filling` rows at the top of each poll.
 
 **Type consistency check.** `FillOutcome` is defined once in `fillers/types.ts` and returned unchanged by every filler and by `processTask`. `AtsFiller.matches` takes the resolved landing URL in both `selectFiller` and `processTask`. `resolveAnswer` and `ANSWER_KEYS` come from `@job-agent/core` in both the web app (Task 1) and the worker (Task 8). `createLabelFiller` is defined in `greenhouse.ts` and imported by the three ATS fillers in Task 7.
+
+**Harvest idempotence.** `harvestFields` tags unlabelled elements with `data-job-agent` to build selectors, so it clears prior markers before each pass. Task 4 asserts a second harvest produces identical selectors — a multi-step Lever flow or a retry re-harvests the same page, and stale markers would silently point a selector at the wrong element.
 
 **Known gap, deliberate.** Free-text questions always block in cycle 1 — that is the documented consequence of the "base resume as-is, nothing generated" scope decision. Cycle 2 generates a draft for those fields and removes most `awaiting_human` halts.
