@@ -6,268 +6,297 @@
 
 ## 1. Problem
 
-Finding relevant full-stack roles means checking dozens of boards by hand, re-reading
-the same postings, and losing track of what has already been applied to. Applying means
-retyping the same twenty answers into every ATS form.
+Finding relevant roles means checking dozens of boards by hand, re-reading the same
+postings, and losing track of what has already been applied to. Applying means retyping the
+same twenty answers into every ATS form.
 
-This app does three things: pull job postings from many sources into one warehouse,
-rank them against a specific person's resume, and drive the application form to the
-point where only the final submit click remains.
+This app does three things: on demand, pull fresh postings from many sources; rank them
+against a specific person's resume; and drive the application form to the point where only
+the final submit click remains.
 
 ## 2. Goals
 
-- Two (extensible to N) resume profiles, each independently ranked and tracked.
-- One button per profile — "Find jobs relevant to my resume" — that runs ingest + ranking
-  and populates a dashboard.
-- Ranked feed with match reasoning, red flags, and per-job state
-  (`new`/`starred`/`queued`/`applied`/`dismissed`).
-- An apply action that opens the real ATS form in the user's own browser with every
-  answerable field already filled, including resume upload.
-- Costs that scale with the user's attention rather than with the volume of the internet.
+- Two (extensible to N) resume profiles, each with its own filter posture and its own
+  applied history.
+- One button per profile — **"Fetch latest jobs for me"** — with a time-frame selector
+  (24h / 3d / 7d / 14d / 30d). It fetches live, ranks, and shows results.
+- Jobs already applied to or dismissed never appear again.
+- An apply action that opens the real ATS form in a browser with every answerable field
+  already filled, including resume upload.
+- Nothing accumulates. No job warehouse, no scheduled jobs, no background processes.
 
 ## 3. Non-goals (cycle 1)
 
+- **No job warehouse and no cron.** Postings are fetched, ranked, displayed, and discarded.
+  See §4 for the one small thing that must persist.
 - Generating tailored resumes or cover letters. The stored base resume PDF is submitted
-  as-is. Free-text questions are not auto-answered — the apply task halts and waits for
-  the user to type them.
+  as-is. Free-text questions are not auto-answered — the apply task halts and waits.
 - Ingesting from LinkedIn, Indeed, Glassdoor, ZipRecruiter, or Naukri. Prohibited by their
-  terms, defended by anti-bot systems, and automating them from the user's own logged-in
-  account puts that account at risk. They remain manual discovery surfaces.
-- Unattended submit. See §5.
+  terms, defended by anti-bot systems, and automating them from a user's own logged-in
+  account puts that account at risk. They stay manual discovery surfaces.
+- Unattended submit. See §6.
 - Email follow-up tracking, interview scheduling, recruiter CRM.
 
-## 4. Verified source landscape
+## 4. What persists, and why
+
+"Nothing stored" and "show me jobs I haven't applied to" cannot both hold — the second
+requires remembering the first. The minimum that survives:
+
+- **`profiles`** — resume PDF, parsed profile, filter posture, answer bank. Without this
+  there is no profile to match against.
+- **`job_ledger`** — one row per job the user *acted on*: applied or dismissed. Nothing
+  else. A user who applies to 200 jobs over a year has 200 rows.
+- **`apply_tasks`** — a transient queue row per in-flight application, deleted on completion.
+
+No table accumulates postings. A fetch that returns 3,000 jobs writes zero rows.
+
+## 5. Verified source landscape
 
 All checks below were run against live endpoints on 2026-08-29. The unit of coverage is
-**company board tokens**, not websites — a single Greenhouse adapter with 300 tokens is
-broader and far more stable than 100 bespoke scrapers.
-
-### Reachable, unauthenticated, JSON
+**company board tokens**, not websites — one Greenhouse adapter over 200 tokens is broader
+and far more stable than 100 bespoke scrapers.
 
 | Adapter | Endpoint | Verified |
 |---|---|---|
-| `greenhouse` | `GET https://boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | 200 (coinbase, consensys, stripe) |
-| `lever` | `GET https://api.lever.co/v0/postings/{token}?mode=json` | 200 (palantir, spotify, matchgroup) |
-| `ashby` | `POST https://jobs.ashbyhq.com/api/non-user-graphql` op `ApiJobBoardWithTeams` | 200 |
-| `remoteok` | `GET https://remoteok.com/api` | 200 |
-| `arbeitnow` | `GET https://www.arbeitnow.com/api/job-board-api` | 200 |
-| `hn_whoishiring` | `GET https://hn.algolia.com/api/v1/search` | 200 |
+| `greenhouse` | `GET boards-api.greenhouse.io/v1/boards/{token}/jobs?content=true` | 200 (coinbase, consensys, stripe, discord, gitlab) |
+| `lever` | `GET api.lever.co/v0/postings/{token}?mode=json` | 200 (palantir, spotify, matchgroup) |
+| `ashby` | `POST jobs.ashbyhq.com/api/non-user-graphql` op `ApiJobBoardWithTeams` | 200 |
+| `remoteok` | `GET remoteok.com/api` | 200 |
+| `arbeitnow` | `GET www.arbeitnow.com/api/job-board-api` | 200 |
+| `hn_whoishiring` | `GET hn.algolia.com/api/v1/search` | 200 |
 
 Board tokens 404 when a company is not on that provider (`plaid` on Lever, `uniswaplabs`
-on Greenhouse). The 200-vs-404 response is itself a cheap discovery mechanism: take
-company names seen in aggregator results, probe each provider, record the hits.
+on Greenhouse). That 200-vs-404 response is itself a discovery mechanism: probe company
+names seen in aggregator results against each provider, record the hits.
+`sources/boards.yaml` is checked into the repo and seeds ~200 company/provider pairs.
 
-### Board token seeding
+### 5.1 Post-date fidelity — the time-frame filter depends on this
 
-`sources/boards.yaml` is checked into the repo and seeds ~200 known company/provider
-pairs. A background `discover` run cross-references company names from aggregator
-postings against each provider and appends confirmed tokens. Tokens that 404 for three
-consecutive runs are marked inactive rather than deleted.
+The time-frame selector is the centre of the product, so each adapter's date field was
+verified rather than assumed:
 
-## 5. Submit-path findings — why apply is one click, not zero
+| Adapter | Field | Fidelity |
+|---|---|---|
+| `greenhouse` | `first_published` | **True post date.** 51/51 coverage on discord's board, and genuinely distinct from `updated_at` (e.g. published 2026-06-23, updated 2026-08-06) |
+| `lever` | `createdAt` (epoch ms) | True post date |
+| `remoteok` | `epoch` / `date` | True post date |
+| `arbeitnow` | `created_at` (epoch) | True post date |
+| `hn_whoishiring` | comment `created_at` | True post date |
+| `ashby` | **none** | The public board query exposes no date field. `publishedAt`, `createdAt`, `updatedAt`, `publishedDate`, `listedDate` all rejected by the schema; introspection is disabled |
+
+**Never filter Greenhouse on `updated_at`.** A role posted in March and edited yesterday
+would surface as "posted in the last 24 hours," which is the one lie this product cannot
+afford — the entire workflow rests on applying to genuinely fresh postings.
+
+Ashby carries `dateFidelity: 'none'` and is **excluded from time-framed fetches by default**.
+It appears only when the time frame is set to "any", behind a labelled toggle. Every source
+in the results UI displays its date fidelity, so a posting's freshness claim is always
+traceable to a real field.
+
+## 6. Submit-path findings — why apply is one click, not zero
 
 Apply forms were fetched and inspected directly:
 
 | Provider | Apply-form gate |
 |---|---|
-| Greenhouse (`job-boards.greenhouse.io`) | Cloudflare challenge — `cf-mitigated: challenge`, HTTP 403 with `<title>Just a moment...` even with a browser user-agent |
-| Lever (`jobs.lever.co/{org}/{id}/apply`) | hCaptcha — page returns 200 and exposes an `h-captcha-response` field required on submit |
-| Ashby (`jobs.ashbyhq.com/{org}`) | reCAPTCHA |
-| Workable (`apply.workable.com/{org}`) | reCAPTCHA and Turnstile |
+| Greenhouse | Cloudflare challenge on plain HTTP — `cf-mitigated: challenge`, 403, `<title>Just a moment...` even with a browser user-agent |
+| Lever | hCaptcha — 200, with an `h-captcha-response` field required on submit |
+| Ashby | reCAPTCHA |
+| Workable | reCAPTCHA and Turnstile |
 
 Every major ATS gates submission behind a CAPTCHA or an edge challenge. Clearing those
 programmatically requires a CAPTCHA-solving service, which is deliberate circumvention and
-results in the originating account and IP being blocked. The app will not do this.
+gets the originating account and IP blocked. The app will not do this.
 
-The form **fill** side is entirely tractable. Lever's field names enumerate cleanly from
-the page: `name`, `email`, `phone`, `location`, `org`, `resume`, `consent[marketing]`,
-`cards[{uuid}][field{n}]`, `surveysResponses[{uuid}][...]`. Greenhouse and Ashby expose
-comparably structured forms once a real browser session has loaded them.
+### 6.1 Verified browser mechanism
 
-### 5.1 Verified browser mechanism
+The 403 above is a *curl* result. Whether an automated browser is also challenged was tested
+directly, because the apply feature rests on the answer.
 
-The Cloudflare 403 above is a *curl* result. Whether an automated browser also gets
-challenged was tested directly, because the whole apply feature rests on the answer.
-
-Playwright `launchPersistentContext` with a **dedicated** user-data-dir (not the user's
-daily Chrome profile), `channel: 'chrome'`, `headless: false`, against a live
-Greenhouse-hosted posting:
+Playwright `launchPersistentContext` with a **dedicated** user-data-dir (not the user's daily
+Chrome profile), `channel: 'chrome'`, `headless: false`, against live Greenhouse postings:
 
 ```
-discord: 200 | https://job-boards.greenhouse.io/discord/jobs/8599937002
+discord: 200 | job-boards.greenhouse.io/discord/jobs/8599937002
   visible fields 34 | file inputs 2 | captcha widgets 1
-gitlab : 200 | https://job-boards.greenhouse.io/gitlab/jobs/8503792002
+gitlab : 200 | job-boards.greenhouse.io/gitlab/jobs/8503792002
   visible fields 22 | file inputs 2 | captcha widgets 1
 ```
 
-No challenge, no interstitial, the full application form renders. The mechanism works.
+No challenge, no interstitial, full application form rendered. The mechanism works.
 
-A **dedicated** profile directory is required, not the user's real one: Chrome holds a lock
-on its user-data-dir, so driving the daily profile would mean quitting Chrome before every
-application. The worker's profile is separate, persistent, and reused — any login or
-challenge the user clears in it once carries forward.
+A **dedicated** profile directory is required: Chrome holds a lock on its user-data-dir, so
+driving the daily profile would mean quitting Chrome before every application. The worker's
+profile is separate, persistent, and reused — any login or challenge cleared in it once
+carries forward.
 
-### 5.2 Two findings that shape the filler
+### 6.2 Two findings that shape the filler
 
-**Fields have no usable `name` attributes.** The rendered Greenhouse form is
-React-controlled; the only named input on the page is `g-recaptcha-response`. Labels,
-however, are clean and semantic:
+**Fields have no usable `name` attributes.** The rendered Greenhouse form is React-controlled;
+the only named input on the page is `g-recaptcha-response`. Labels are clean and semantic:
 
 ```
 First Name* | Last Name* | Email* | Country* | Phone* | Location (City)* |
 Attach | Enter manually | School | Degree | Discipline | LinkedIn Profile
 ```
 
-Fillers therefore match on **label, `aria-label`, and placeholder text — never on `name`**.
-This also makes the approach portable: a label-driven filler degrades gracefully on forms
-it has never seen.
+Fillers match on **label, `aria-label`, and placeholder text — never on `name`**. This also
+makes the approach portable: a label-driven filler degrades gracefully on unseen forms.
 
-**Apply URLs split into two populations.** The Greenhouse API's `absolute_url` does not
-reliably point at a Greenhouse form:
+**Apply URLs split into two populations.** Greenhouse's `absolute_url` does not reliably
+point at a Greenhouse form:
 
 | Board | `absolute_url` host |
 |---|---|
 | discord, gitlab, anthropic | `job-boards.greenhouse.io` — raw ATS form, fillable |
-| coinbase, stripe, consensys | `www.coinbase.com`, `stripe.com`, `consensys.io` — company-wrapped, bespoke DOM |
+| coinbase, stripe, consensys | `coinbase.com`, `stripe.com`, `consensys.io` — company-wrapped, bespoke DOM |
 
-Large companies wrap their board in their own careers site. The worker resolves the final
-URL after redirects and picks a filler by the *landing* host, not the source adapter. When
-no known-ATS filler matches, it falls back to the generic label-driven filler (§8.1).
+The worker resolves the final URL after redirects and picks a filler by the *landing* host,
+not by the source adapter.
 
-**Therefore:** the apply worker drives a dedicated persistent Chrome profile, non-headless, with
-its existing cookies — the same session a human uses, which is why a human never sees the
-Cloudflare interstitial. It fills every field it has an answer for, uploads the resume,
-scrolls to the submit control, and hands the tab over. The user clicks submit and solves a
-CAPTCHA tile if one appears.
+**Therefore:** the worker drives a dedicated persistent Chrome profile, fills every field it
+has an answer for, uploads the resume, scrolls to submit, and hands the tab over. The user
+clicks submit and solves a CAPTCHA tile if one appears.
 
-The schema carries a per-adapter `submitMode: 'auto' | 'assisted'`. In cycle 1 every
-adapter is `assisted` and the worker never clicks submit — the field exists so that an
-ungated provider discovered later becomes a data change rather than a rewrite. Honouring
-`auto` is itself a cycle-2 decision, and would additionally require the profile's
-`auto_submit_authorized` to be true.
+The schema carries a per-adapter `submitMode: 'auto' | 'assisted'`. In cycle 1 every adapter
+is `assisted` and the worker never clicks submit — the field exists so an ungated provider
+discovered later is a data change rather than a rewrite. Honouring `auto` is a cycle-2
+decision and would additionally require `auto_submit_authorized`.
 
-## 6. Architecture
+## 7. Architecture — on demand
 
 ```
-                   ┌─────────────── shared, profile-agnostic ───────────────┐
-  sources ──────>  adapters ──> normalize ──> dedup ──> Postgres (jobs)
-                   └────────────────────────────────────────────────────────┘
-                                                  │
-                   ┌────────────── per-profile ───┴─────────────────────────┐
-                   │  Tier 1: deterministic SQL filter      ~3000 → ~120    │
-                   │  Tier 2: Claude batch rank (Sonnet)    ~120 → scored   │
-                   │  Tier 3: Claude deep-dive (Opus), on starred jobs only │
-                   └────────────────────────────────────────────────────────┘
-                                                  │
-                                          dashboard (Vercel)
-                                                  │
-                                          apply_tasks queue
-                                                  │
-                                    local worker (Playwright + real Chrome)
+  [Fetch latest jobs]  ← profile + time frame
+           │
+           ├─ fan-out to adapters, concurrency-capped        ~2-8s
+           │    greenhouse × N tokens · lever × N · remoteok · arbeitnow · hn
+           ├─ normalize                                      in memory
+           ├─ dedup by job_key                               in memory
+           ├─ exclude everything in job_ledger for profile   1 SQL read
+           ├─ time-frame filter on verified post date        in memory
+           ├─ profile-derived filter (§7.2)                  in memory
+           │       ~3000 → ~120
+           ├─ Claude rank (Sonnet, batched)                  ~5-15s
+           └─ render ranked cards
 ```
 
-**One warehouse, N ranked views.** Ingest runs once and serves every profile. Tier 1 and
-Tier 2 are scoped to a profile. This must not be implemented as one pipeline per profile.
+Nothing is written. Progress streams to the page so the wait is legible:
 
-### 6.1 Ingest
+```
+fetching 214 sources … 3,140 postings … 2,890 in time frame … 118 match … ranking …
+```
 
-Runs on Vercel Cron twice daily, and on demand when the "Find jobs" button fires against a
-warehouse older than 6 hours.
+**Tradeoff, stated plainly:** every fetch re-pays the fan-out and the ranking cost. Expect
+15–30 seconds end to end. For an occasional, deliberate "whenever I'm free" fetch this is
+the right trade — a warehouse earns its keep only under continuous polling, which is not
+the usage pattern here.
 
-Each adapter implements:
+An optional 24-hour score cache keyed by `(job_key, profile_id)` would make repeat fetches
+within a day nearly free, at the cost of one more small table. Not in v1; add it if repeat
+fetching becomes a habit.
+
+### 7.1 Job key — load-bearing
+
+In an on-demand design the key is the *sole* mechanism making "jobs I haven't applied to"
+work. If a job returns from a different source as `Senior Software Engineer (Remote)` when
+the ledger holds `Senior Software Engineer`, an applied job reappears. That is the design's
+most visible failure mode, so the key is defensive:
 
 ```ts
-interface SourceAdapter {
-  kind: SourceKind
-  fetch(source: SourceRow): Promise<RawPosting[]>
-  normalize(raw: RawPosting): NormalizedJob
-}
+ats_key  = `${ats_kind}:${ats_ref}`   // "greenhouse:discord/8599937002" — exact, preferred
+slug_key = `${slug(company)}|${normalizeTitle(title)}`  // fallback
 ```
 
-Adapters are isolated: one failing provider marks its own `sources.last_error` and the run
-continues. A run that reaches at least one successful adapter is a successful run.
+`normalizeTitle` lowercases, strips parenthetical suffixes (`(Remote)`, `(m/f/d)`), drops
+trailing location fragments after ` - `, removes punctuation, and collapses whitespace.
 
-`hn_whoishiring` is the one adapter that needs a model. It fetches the current month's
-thread via the Algolia API; each top-level comment is a freeform posting. Claude Haiku
-parses each comment into `{company, title, location, remote, applyUrl, stack[]}`. Comments
-that do not parse as a job posting are dropped.
+Ledger rows store **both**. Exclusion matches on either. Greenhouse, Lever, and Ashby all
+supply a stable ATS identity, so the exact key covers most of the volume and the slug key
+catches aggregator reposts of the same role.
 
-### 6.2 Dedup
+### 7.2 Profile-derived filter
 
-`dedup_key = slug(company) + '|' + slug(title) + '|' + location_bucket`
+**Nothing in this filter is hardcoded to a person.** Seniority band, core stack, and
+geography all derive from `parsed_profile` and the profile's posture. The two seeded
+profiles demonstrate why:
 
-The same role legitimately appears on RemoteOK, Arbeitnow, and the company's own
-Greenhouse board. On collision, keep one row and prefer the ATS-direct `apply_url` as
-canonical — the application should land on the company's real form, not an aggregator's
-repost. `last_seen_at` updates on every collision so stale postings can be aged out.
+| | Profile 1 — Nikhil Mishra | Profile 2 — Shambhavi Soumya |
+|---|---|---|
+| Experience | ~5 years | <1 year, B.Tech CSE May 2026 |
+| Band | mid, senior | entry, junior, associate |
+| **Accepts** | `senior`, `sde 2/3`, `full stack engineer` | **`new grad`, `entry level`, `junior`, `graduate`, `associate`, `trainee`** |
+| **Rejects** | `intern`, `junior`, `new grad`, `staff`, `principal`, `director`, `EM` | `senior`, `staff`, `principal`, `lead`, `manager`, `5+ years` |
+| Core stack | TypeScript, React, Next.js, Node, Express, GraphQL, PostgreSQL, MongoDB, Django | React, Next.js, Node, Express, MongoDB, JavaScript, Python, C#, ASP.NET, MySQL, Tailwind |
+| Bonus signal | Solidity, EVM, Cosmos, DeFi (scores up, never gates) | — |
+| Posture | remote-global, no sponsorship needed | **unset** — defaults to `india + remote` |
 
-### 6.3 Tier 1 — deterministic filter
+The approved earlier draft hardcoded a mid/senior band and rejected `new grad`. Applied to
+profile 2 that returns an empty feed — she is a 2026 graduate and those are her *target*
+keywords. Hence: derived, never fixed.
 
-Pure SQL, no model calls, debuggable in a query console. Rejects on:
+Remaining filter rules, all profile-scoped:
 
-- **Geography** — remote-global posture. Reject postings gated to a country the profile
-  cannot work from: `US only`, `must reside in`, `must be authorized to work in`,
-  `requires security clearance`, on-site-only listings.
-- **Timezone** — reject hard overlap requirements incompatible with IST (e.g. `PST core
-  hours`, `EST 9-5`). Ranges that overlap IST at all pass through to Tier 2.
-- **Seniority band** — reject `intern`, `junior`, `new grad`, `entry level`, `staff`,
-  `principal`, `director`, `VP`, `engineering manager`. Target is mid/senior IC.
-- **Stack overlap** — require at least 2 matches against the profile's core stack.
-  For this resume: TypeScript, JavaScript, React, Next.js, Node.js, Express, GraphQL,
-  PostgreSQL, MongoDB, Django, Tailwind.
-- **Freshness** — `posted_at` within 21 days.
-- **State** — not already `dismissed` or `applied` for this profile.
+- **Geography** — reject postings gated outside the profile's posture: `US only`,
+  `must reside in`, `must be authorized to work in`, `requires security clearance`,
+  on-site listings outside the profile's region.
+- **Timezone** — reject hard overlap requirements incompatible with IST. Ranges that
+  overlap at all pass through to ranking.
+- **Stack overlap** — at least 2 matches against the profile's core stack.
+- **Time frame** — post date within the selected window, using only true post dates (§5.1).
+- **Ledger** — not applied, not dismissed, for this profile.
 
-Implemented with Postgres full-text search and `pg_trgm`. No vector embeddings in v1 —
-they add a third-party embedding vendor for recall the keyword filter already achieves.
-Revisit only if Tier 1 recall is measurably poor against the golden set (§9).
+Profile 2's posture is unset rather than inferred. It defaults to `india + remote` and is
+confirmed by its owner; the app does not guess someone's work-authorization posture from
+their resume.
 
-### 6.4 Tier 2 — Claude rank
+### 7.3 Claude rank
 
-Survivors are batched (20 per call) to `claude-sonnet-5` with the profile's parsed resume
-and a structured-output tool schema:
+Survivors batch 20 per call to `claude-sonnet-5` with the profile's parsed resume and a
+structured-output tool schema:
 
 ```ts
 {
-  jobId: string
+  jobKey: string
   score: number            // 0-100
   tier: 'strong' | 'stretch' | 'skip'
   why: string              // one sentence, shown on the card
-  redFlags: string[]       // e.g. "unpaid trial period", "equity only"
-  sponsorshipGate: boolean // JD implies work authorization the profile lacks
+  redFlags: string[]       // "unpaid trial", "equity only", "8 years required"
+  sponsorshipGate: boolean // JD implies authorization the profile lacks
   timezoneGate: string | null
-  resumeHooks: string[]    // resume points to lead with; feeds cycle-2 tailoring
+  resumeHooks: string[]    // points to lead with; feeds cycle-2 tailoring
 }
 ```
 
-`sponsorshipGate` is a **ranking** signal, not just an apply-time field. Under a
-remote-global posture, postings that quietly require local work authorization must sink.
-The JD language for this is too varied for regex, which is exactly why it belongs here and
-not in Tier 1.
+`sponsorshipGate` is a **ranking** signal, not just an apply-time field. JD language for it
+is too varied for regex, which is exactly why it belongs here and not in §7.2.
 
-### 6.5 Tier 3 — deep dive
+`hn_whoishiring` needs a model at ingest too: thread comments are freeform, so
+`claude-haiku-4-5-20251001` parses each into
+`{company, title, location, remote, applyUrl, stack[], postedAt}`. Non-job comments drop.
 
-Runs only on jobs the user stars. `claude-opus-5` reads the full JD and produces a gap
-analysis and interview-prep notes. Bounded to a handful of calls per day.
-
-## 7. Profiles and the answer bank
+## 8. Profiles and the answer bank
 
 A profile is a person, not a document.
 
 ```
 profiles
-  id, name, owner_email, resume_blob_url, resume_text,
-  parsed_profile jsonb, auto_submit_authorized boolean default false, created_at
+  id, name, owner_email, resume_blob_url, resume_text, parsed_profile jsonb,
+  posture jsonb, auto_submit_authorized boolean default false, created_at
 ```
 
-`parsed_profile` is Claude's structured extraction of the resume: skills, seniority,
-years, employers, links. It is computed once at upload and cached; it drives Tier 1's
-stack list and Tier 2's prompt.
+`parsed_profile` is Claude's structured extraction of the resume — skills, seniority, years,
+graduation year, employers, links. Computed once at upload, cached, and it drives §7.2.
 
-### 7.1 Answer bank
+**Seeded profiles:**
+- Profile 1 — `nikhil_resume_december.pdf`, posture `remote-global / no sponsorship`,
+  answer bank filled by its owner.
+- Profile 2 — `fullstackresume.pdf` (Shambhavi Soumya), `auto_submit_authorized: false`,
+  posture unset (defaults `india + remote`), **answer bank empty**.
 
-The answer bank holds responses the profile owner supplied **once**, keyed by a canonical
-field name. Auto-fill reads from it. Nothing is ever invented.
+### 8.1 Answer bank
+
+Holds responses the profile owner supplied **once**, keyed by canonical field name.
+Auto-fill reads from it. Nothing is ever invented.
 
 ```
 answer_bank
@@ -282,163 +311,154 @@ Seeded keys: `full_name`, `email`, `phone`, `location`, `linkedin_url`, `github_
 Two rules:
 
 - **A field with no stored answer halts the task.** The worker sets
-  `status = 'awaiting_human'`, records the unfilled field in `blocked_fields`, and surfaces
-  it in the UI. It does not guess, and it does not submit a partial form.
-- **EEO/demographic fields default to "decline to self-identify."** These are voluntary.
-  The owner may set a different value explicitly; the app never picks one for them.
+  `status = 'awaiting_human'`, records the field in `blocked_fields`, and surfaces it in the
+  UI. It does not guess, and it does not submit a partial form.
+- **EEO/demographic fields default to "decline to self-identify."** These are voluntary. The
+  owner may set a different value explicitly; the app never picks one for them.
 
 Per-job free-text ("why do you want to work here?") cannot come from the bank. In cycle 1
-these always halt for the user to type. Cycle 2 generates a draft for review.
+these always halt for the user to type.
 
 **This is the common path, not the exception.** Live forms confirm it — Discord's
 application carries a required *"Why do you want to work at Discord?"*, GitLab's asks about
-existing employment agreements. Expect most applications in cycle 1 to end at
-`awaiting_human` with one or two paragraphs to write. The realistic v1 experience is
-"every mechanical field filled, resume uploaded, one box left for you," not "applied."
+existing employment agreements. Expect most cycle-1 applications to end at `awaiting_human`
+with a paragraph to write. The realistic v1 experience is "every mechanical field filled,
+resume uploaded, one box left for you," not "applied."
 
+### 8.2 Second-profile authorization
 
-### 7.2 Second profile authorization
+Profile 2 belongs to a different person. Applications under it carry their name and answers.
 
-The second profile belongs to a different person. Applications submitted under it carry
-their name and their answers.
+- `auto_submit_authorized` defaults to **false**, and a false profile stays in assisted mode
+  regardless of any future `submitMode: 'auto'` adapter.
+- Its answer bank must be filled by its owner, not inferred. Work authorization,
+  compensation, notice period, and EEO values start empty and halt on first use.
+- Its resume PDF and PII live in this project's database and go nowhere else. Model calls
+  send resume text to the Anthropic API for parsing and ranking; nothing goes to any other
+  third party.
 
-- `auto_submit_authorized` defaults to **false**. A profile with it false stays in assisted
-  mode regardless of any future `submitMode: 'auto'` adapter.
-- That profile's answer bank must be filled in by its owner, not inferred from their resume.
-  Work authorization, compensation, notice period, and EEO values start empty and halt on
-  first use.
-- Their resume PDF and PII live in the project's Neon database and are not sent anywhere
-  else. Model calls send resume text to the Anthropic API for parsing and ranking; nothing
-  is sent to any other third party.
-
-## 8. Apply flow
+## 9. Apply flow
 
 ```
-user clicks Apply
-  → apply_tasks row: status='queued'
-  → local worker polls (same Neon DB)
-  → status='opening'  : launch Playwright against the user's persistent Chrome profile
-  → status='filling'  : detect ATS kind from apply_url, run that filler
+user clicks Apply on a result card
+  → apply_tasks row: status='queued', carries the job's apply_url and job_key
+  → local worker polls
+  → status='opening'  : Playwright launches the dedicated persistent Chrome profile
+  → status='filling'  : resolve final URL after redirects, select filler by landing host
   → resume upload from stored blob
   → every mapped field filled from answer_bank
   → unmapped or unanswerable field → blocked_fields
-  → status='awaiting_human' : tab handed to user, focused, scrolled to submit
-  → user clicks submit (solves CAPTCHA if shown), clicks "Mark applied" in dashboard
-  → status='submitted', job_states.applied_at set
+  → status='awaiting_human' : tab focused, scrolled to submit
+  → user clicks submit, then "Mark applied" in the dashboard
+  → job_ledger row written (both keys, state='applied'), apply_tasks row deleted
 ```
 
 The worker never clicks submit in cycle 1. Marking applied is an explicit user action, so
-the tracker never contains a fabricated submission.
+the ledger never contains a fabricated submission. Because results are ephemeral, the ledger
+row is written from the task payload, not looked up.
 
-### 8.1 Filler strategy
+### 9.1 Filler strategy
 
 Two layers:
 
-1. **Known-ATS fillers** — `greenhouse.ts`, `lever.ts`, `ashby.ts`, `workable.ts`. Selected
-   by the resolved landing host. Encode that ATS's quirks (multi-step flows, the
-   `Attach / Enter manually` resume toggle, custom-question containers).
-2. **Generic label-driven filler** — the fallback for company-wrapped and unknown forms.
-   It enumerates every visible input with its label/aria/placeholder text, then asks Claude
-   Haiku to map that label list onto `answer_bank` keys, returning
-   `{ label, answerKey | null, confidence }`. Anything mapped below threshold, or to
-   `null`, goes to `blocked_fields` rather than being filled on a guess.
+1. **Known-ATS fillers** — `greenhouse.ts`, `lever.ts`, `ashby.ts`, `workable.ts`, selected by
+   resolved landing host. Encode that ATS's quirks: multi-step flows, the
+   `Attach / Enter manually` resume toggle, custom-question containers.
+2. **Generic label-driven filler** — fallback for company-wrapped and unknown forms. It
+   enumerates every visible input with its label/aria/placeholder text, then asks
+   `claude-haiku-4-5-20251001` to map that label list onto `answer_bank` keys, returning
+   `{ label, answerKey | null, confidence }`. Anything below threshold, or `null`, goes to
+   `blocked_fields` rather than being filled on a guess.
 
-Both layers write a `fill_report` naming every field filled, its source key, and every
-field left blocked — so a mis-fill is auditable after the fact.
+Both write a `fill_report` naming every field filled, its source key, and every field left
+blocked — so a mis-fill is auditable after the fact.
 
-Per-ATS fillers are modules (`greenhouse.ts`, `lever.ts`, `ashby.ts`, `workable.ts`) with a
-shared `AtsFiller` interface. An `apply_url` matching no known filler produces a task that
-opens the page and reports every field as blocked — still useful, just not filled.
+## 10. Dashboard
 
-## 8.5 Dashboard and the "Find jobs" action
+Opens on a profile switcher — two cards, one per resume. Selecting a profile scopes
+everything below.
 
-The dashboard opens on a profile switcher — two cards, one per resume. Selecting a profile
-scopes everything below it.
-
-**"Find jobs relevant to my resume"** starts a `run` and streams progress back to the page
-so the search is visible rather than a spinner:
-
-```
-fetching 6 sources … 3,140 postings … 214 new … filtered to 118 … ranking …
-```
-
-The run re-ingests only if the warehouse is older than 6 hours; otherwise it goes straight
-to Tier 1 and Tier 2 for that profile, so repeat clicks return in seconds.
-
-```
-runs
-  id, profile_id nullable, kind ('ingest'|'rank'|'discover'),
-  status ('running'|'ok'|'partial'|'failed'), stats jsonb,
-  started_at, finished_at, error
-```
+Controls: **time frame** (24h / 3d / 7d / 14d / 30d / any) and **Fetch latest jobs for me**.
+Ashby appears only at "any", behind a labelled toggle (§5.1).
 
 Results render as ranked cards: score, `why`, red flags, company, title, location, source,
-age, and the actions `Apply`, `Star`, `Dismiss`. Filters: tier, source, age, and state.
-Job state is stored per profile per job, so the same posting can be `applied` for one
-profile and `new` for the other.
+post date with its fidelity, and the actions `Apply` and `Dismiss`. Results live in page
+state; a reload re-fetches. Filters over the current result set: tier, source, age.
 
-## 9. Testing
+`Dismiss` writes a ledger row so the posting never returns. This is the only way to suppress
+a result, since there is nothing else remembering it.
 
-- **Adapter contract tests** run against recorded JSON fixtures committed to the repo, not
-  live endpoints. A separate, manually-run `pnpm test:live` hits real endpoints and is the
-  canary for upstream API changes.
-- **Dedup** unit tests over hand-built collision cases, including the RemoteOK/Greenhouse
-  duplicate.
-- **Tier 1** tested as SQL against a seeded fixture set, asserting specific postings are
-  rejected for specific reasons.
-- **Tier 2** validated against a golden set: ~30 postings labeled by hand as
-  strong/stretch/skip. Assert rank correlation, not exact scores. This set is also the
-  regression check when the prompt or model changes.
-- **Fillers** tested against saved ATS form HTML fixtures. Never against live apply forms —
-  a test suite must not create real applications.
+## 11. Testing
 
-## 10. Error handling
+- **Adapter contract tests** against recorded JSON fixtures committed to the repo. A separate
+  `pnpm test:live` hits real endpoints and is the canary for upstream API changes.
+- **Date-fidelity tests** assert each adapter maps to the field in §5.1 — specifically that
+  Greenhouse reads `first_published` and never `updated_at`. This is the regression most
+  likely to reintroduce a silent freshness lie.
+- **Job-key tests** over collision cases: `Senior Software Engineer` vs
+  `Senior Software Engineer (Remote)` vs `Senior Software Engineer - Bangalore` must produce
+  one key; two genuinely different roles at one company must not.
+- **Profile-derived filter tests** run the same fixture set through both profiles and assert
+  opposite outcomes on seniority — a `new grad` posting passes for profile 2 and fails for
+  profile 1. This is the guard against re-hardcoding.
+- **Ranking** validated against a golden set of ~30 hand-labelled postings per profile.
+  Assert rank correlation, not exact scores. Also the regression check when the prompt or
+  model changes.
+- **Fillers** tested against saved ATS form HTML fixtures. Never against live apply forms — a
+  test suite must not create real applications.
 
-- A failing adapter is isolated to its own source row; the run continues.
-- Sources track `last_ok_at` and `last_error`; three consecutive failures deactivate the
-  source and surface it in the UI.
-- Model calls retry twice with backoff; a batch that fails all attempts leaves those jobs
-  unscored and eligible for the next run rather than dropping them.
-- Ingest is idempotent. Re-running updates `last_seen_at` and inserts nothing duplicate.
+## 12. Error handling
+
+- A failing adapter is isolated; the fetch continues and the UI reports which sources failed
+  and how many results are therefore missing.
+- A fetch reaching zero successful adapters is an error, not an empty feed. The two are never
+  conflated in the UI.
+- Model calls retry twice with backoff. A batch failing all attempts renders those jobs
+  unranked at the bottom rather than dropping them.
+- Fan-out concurrency is capped (default 20) so ~200 board tokens do not open 200 sockets.
 - Worker crash mid-fill leaves the task in `filling`; tasks stuck over 10 minutes reset to
   `queued`.
 
-## 11. Stack and runtime split
+## 13. Stack and runtime
 
 **pnpm workspaces:**
 
 ```
-apps/web      Next.js 15 App Router, TypeScript, Tailwind, shadcn/ui  → Vercel
-apps/worker   Node + Playwright, local only                           → user's machine
-packages/db   Drizzle schema + migrations, shared
-packages/core  adapters, normalize, dedup, tier1, tier2 prompts, shared
+apps/web       Next.js 15 App Router, TypeScript, Tailwind, shadcn/ui  → Vercel
+apps/worker    Node + Playwright, local only                           → user's machine
+packages/db    Drizzle schema + migrations, shared
+packages/core  adapters, normalize, job-key, filters, rank prompts, shared
 ```
 
-- **Vercel**: web app, Neon Postgres (Marketplace), Vercel Cron for ingest. The Anthropic
-  API key is server-side only and never reaches the client.
-- **Local**: the worker, connecting to the same Neon database over a pooled connection.
-  Browser session cookies never leave the machine.
-- Models: `claude-sonnet-5` for Tier 2 ranking, `claude-haiku-4-5-20251001` for HN comment
-  parsing and resume extraction, `claude-opus-5` for Tier 3 deep dives.
+- **Vercel**: web app, Neon Postgres (Marketplace) holding only §4's three tables. **No cron
+  jobs** — fetching is user-initiated. The Anthropic API key is server-side only.
+- **Local**: the worker, on the same database over a pooled connection. Browser session
+  cookies never leave the machine.
+- Models: `claude-sonnet-5` for ranking, `claude-haiku-4-5-20251001` for resume extraction,
+  HN comment parsing, and generic field mapping.
 
-## 12. Cycle boundaries
+## 14. Cycle boundaries
 
-**Cycle 1 (this spec):** profiles, answer bank, ingest across the six verified adapters,
-dedup, Tier 1 + Tier 2 ranking, dashboard, state tracking, assisted apply worker.
+**Cycle 1 (this spec):** two profiles, answer bank, on-demand fetch across five
+time-framed adapters, job key + ledger, profile-derived filter, Claude ranking, dashboard,
+assisted apply worker.
 
-**Cycle 2:** cover letter and free-text answer generation, resolving the `awaiting_human`
+**Cycle 2:** cover letter and free-text answer generation — removes the `awaiting_human`
 halt for text fields.
 
 **Cycle 3:** per-job tailored resume PDF generation, with a review step.
 
-**Cycle 4:** email follow-up tracking and response detection.
+**Cycle 4:** optional score cache and saved searches, if repeat fetching becomes a habit.
 
-## 13. Risks
+## 15. Risks
 
 | Risk | Mitigation |
 |---|---|
-| Upstream ATS APIs change shape | Adapters isolated; `test:live` canary; contract tests fail loudly |
-| Board token list goes stale | Discovery run appends; 3× 404 marks inactive rather than deleting |
-| ATS form DOM changes break fillers | Fillers degrade to "opens page, reports blocked fields" rather than misfiling |
-| Tier 1 over-filters, hiding good roles | Golden set measures recall; rejected postings are retained with a rejection reason, so the filter is auditable |
-| Ranking cost grows | Tier 2 is bounded by Tier 1 output, not by ingest volume |
+| Job key misses, applied job reappears | Dual key (exact ATS identity + normalized slug); collision tests in §11 |
+| Greenhouse date read from `updated_at` | Explicit test asserting `first_published`; fidelity shown in the UI |
+| Ashby has no post date | Excluded from time-framed fetches; surfaced only at "any" behind a toggle |
+| Fetch latency grows with token count | Capped concurrency; streamed progress; token list is a curated file, not unbounded |
+| Every fetch re-pays ranking cost | Ranking bounded by §7.2 output, not by fetch volume; score cache available in cycle 4 |
+| ATS form DOM changes break fillers | Label-driven matching, not selectors; degrades to "opens page, reports blocked fields" |
+| Filter over-rejects, feed looks empty | Rejected postings retained in the response with a rejection reason, viewable behind a toggle, so the filter is auditable |
+| Upstream API shape changes | Adapters isolated; `test:live` canary; contract tests fail loudly |
