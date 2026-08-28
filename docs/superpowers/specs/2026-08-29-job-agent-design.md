@@ -271,7 +271,7 @@ structured-output tool schema:
 is too varied for regex, which is exactly why it belongs here and not in §7.2.
 
 `hn_whoishiring` needs a model at ingest too: thread comments are freeform, so
-`claude-haiku-4-5-20251001` parses each into
+`claude-haiku-4-5` parses each into
 `{company, title, location, remote, applyUrl, stack[], postedAt}`. Non-job comments drop.
 
 ## 8. Profiles and the answer bank
@@ -366,7 +366,7 @@ Two layers:
    `Attach / Enter manually` resume toggle, custom-question containers.
 2. **Generic label-driven filler** — fallback for company-wrapped and unknown forms. It
    enumerates every visible input with its label/aria/placeholder text, then asks
-   `claude-haiku-4-5-20251001` to map that label list onto `answer_bank` keys, returning
+   `claude-haiku-4-5` to map that label list onto `answer_bank` keys, returning
    `{ label, answerKey | null, confidence }`. Anything below threshold, or `null`, goes to
    `blocked_fields` rather than being filled on a guess.
 
@@ -434,8 +434,13 @@ packages/core  adapters, normalize, job-key, filters, rank prompts, shared
   jobs** — fetching is user-initiated. The Anthropic API key is server-side only.
 - **Local**: the worker, on the same database over a pooled connection. Browser session
   cookies never leave the machine.
-- Models: `claude-sonnet-5` for ranking, `claude-haiku-4-5-20251001` for resume extraction,
-  HN comment parsing, and generic field mapping.
+- Models are a single exported constant, `packages/core/src/models.ts`, so swapping is one
+  line. Defaults: `claude-opus-5` for ranking (judgment work), `claude-haiku-4-5` for the
+  mechanical calls — resume extraction, HN comment parsing, generic field mapping.
+  Ranking ~120 jobs costs roughly $0.90/fetch on Opus, $0.36 on Sonnet, $0.18 on Haiku;
+  changing `RANK_MODEL` to `claude-sonnet-5` is the cost lever if fetches get frequent.
+- Structured model output uses `client.messages.parse()` with `zodOutputFormat` — never
+  hand-parsed JSON out of a text block.
 
 ## 14. Cycle boundaries
 
