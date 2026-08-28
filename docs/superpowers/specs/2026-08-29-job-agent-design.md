@@ -34,6 +34,12 @@ the final submit click remains.
 - Ingesting from LinkedIn, Indeed, Glassdoor, ZipRecruiter, or Naukri. Prohibited by their
   terms, defended by anti-bot systems, and automating them from a user's own logged-in
   account puts that account at risk. They stay manual discovery surfaces.
+- **Ingesting X/Twitter through its API.** `api.twitter.com/2/tweets/search/recent` returns
+  401 unauthenticated and the free tier carries no search endpoint at all; search starts at
+  the paid Basic tier. X hiring posts are reached instead as indexed pages through the
+  web-search adapter (`site:x.com "we're hiring"`), which covers the visible subset without
+  a subscription. If full X coverage is wanted later, it is a paid API tier plus one
+  adapter — no architectural change.
 - Unattended submit. See §6.
 - Email follow-up tracking, interview scheduling, recruiter CRM.
 
@@ -64,6 +70,8 @@ and far more stable than 100 bespoke scrapers.
 | `remoteok` | `GET remoteok.com/api` | 200 |
 | `arbeitnow` | `GET www.arbeitnow.com/api/job-board-api` | 200 |
 | `hn_whoishiring` | `GET hn.algolia.com/api/v1/search` | 200 |
+| `websearch` | Claude `web_search_20260209` server tool | Runs on Anthropic infrastructure — no Google API key, no second vendor |
+| `bluesky` | `POST bsky.social/xrpc/com.atproto.server.createSession` then `app.bsky.feed.searchPosts` | Public search returns 403 unauthenticated; `createSession` answers correctly on bad credentials, so a free account plus an app password unlocks it |
 
 Board tokens 404 when a company is not on that provider (`plaid` on Lever, `uniswaplabs`
 on Greenhouse). That 200-vs-404 response is itself a discovery mechanism: probe company
@@ -82,6 +90,8 @@ verified rather than assumed:
 | `remoteok` | `epoch` / `date` | True post date |
 | `arbeitnow` | `created_at` (epoch) | True post date |
 | `hn_whoishiring` | comment `created_at` | True post date |
+| `bluesky` | post `createdAt` | True post date |
+| `websearch` | date stated on the page | **Reported, not true.** A date a model read off a page. Usable for time-framed fetches but labelled distinctly in the UI; when no date is stated the posting falls back to `none` |
 | `ashby` | **none** | The public board query exposes no date field. `publishedAt`, `createdAt`, `updatedAt`, `publishedDate`, `listedDate` all rejected by the schema; introspection is disabled |
 
 **Never filter Greenhouse on `updated_at`.** A role posted in March and edited yesterday
