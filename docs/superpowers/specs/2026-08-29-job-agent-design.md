@@ -84,7 +84,57 @@ the page: `name`, `email`, `phone`, `location`, `org`, `resume`, `consent[market
 `cards[{uuid}][field{n}]`, `surveysResponses[{uuid}][...]`. Greenhouse and Ashby expose
 comparably structured forms once a real browser session has loaded them.
 
-**Therefore:** the apply worker drives the user's *own* Chrome profile, non-headless, with
+### 5.1 Verified browser mechanism
+
+The Cloudflare 403 above is a *curl* result. Whether an automated browser also gets
+challenged was tested directly, because the whole apply feature rests on the answer.
+
+Playwright `launchPersistentContext` with a **dedicated** user-data-dir (not the user's
+daily Chrome profile), `channel: 'chrome'`, `headless: false`, against a live
+Greenhouse-hosted posting:
+
+```
+discord: 200 | https://job-boards.greenhouse.io/discord/jobs/8599937002
+  visible fields 34 | file inputs 2 | captcha widgets 1
+gitlab : 200 | https://job-boards.greenhouse.io/gitlab/jobs/8503792002
+  visible fields 22 | file inputs 2 | captcha widgets 1
+```
+
+No challenge, no interstitial, the full application form renders. The mechanism works.
+
+A **dedicated** profile directory is required, not the user's real one: Chrome holds a lock
+on its user-data-dir, so driving the daily profile would mean quitting Chrome before every
+application. The worker's profile is separate, persistent, and reused — any login or
+challenge the user clears in it once carries forward.
+
+### 5.2 Two findings that shape the filler
+
+**Fields have no usable `name` attributes.** The rendered Greenhouse form is
+React-controlled; the only named input on the page is `g-recaptcha-response`. Labels,
+however, are clean and semantic:
+
+```
+First Name* | Last Name* | Email* | Country* | Phone* | Location (City)* |
+Attach | Enter manually | School | Degree | Discipline | LinkedIn Profile
+```
+
+Fillers therefore match on **label, `aria-label`, and placeholder text — never on `name`**.
+This also makes the approach portable: a label-driven filler degrades gracefully on forms
+it has never seen.
+
+**Apply URLs split into two populations.** The Greenhouse API's `absolute_url` does not
+reliably point at a Greenhouse form:
+
+| Board | `absolute_url` host |
+|---|---|
+| discord, gitlab, anthropic | `job-boards.greenhouse.io` — raw ATS form, fillable |
+| coinbase, stripe, consensys | `www.coinbase.com`, `stripe.com`, `consensys.io` — company-wrapped, bespoke DOM |
+
+Large companies wrap their board in their own careers site. The worker resolves the final
+URL after redirects and picks a filler by the *landing* host, not the source adapter. When
+no known-ATS filler matches, it falls back to the generic label-driven filler (§8.1).
+
+**Therefore:** the apply worker drives a dedicated persistent Chrome profile, non-headless, with
 its existing cookies — the same session a human uses, which is why a human never sees the
 Cloudflare interstitial. It fills every field it has an answer for, uploads the resume,
 scrolls to the submit control, and hands the tab over. The user clicks submit and solves a
@@ -240,6 +290,13 @@ Two rules:
 Per-job free-text ("why do you want to work here?") cannot come from the bank. In cycle 1
 these always halt for the user to type. Cycle 2 generates a draft for review.
 
+**This is the common path, not the exception.** Live forms confirm it — Discord's
+application carries a required *"Why do you want to work at Discord?"*, GitLab's asks about
+existing employment agreements. Expect most applications in cycle 1 to end at
+`awaiting_human` with one or two paragraphs to write. The realistic v1 experience is
+"every mechanical field filled, resume uploaded, one box left for you," not "applied."
+
+
 ### 7.2 Second profile authorization
 
 The second profile belongs to a different person. Applications submitted under it carry
@@ -273,7 +330,23 @@ user clicks Apply
 The worker never clicks submit in cycle 1. Marking applied is an explicit user action, so
 the tracker never contains a fabricated submission.
 
-Fillers are per-ATS modules (`greenhouse.ts`, `lever.ts`, `ashby.ts`, `workable.ts`) with a
+### 8.1 Filler strategy
+
+Two layers:
+
+1. **Known-ATS fillers** — `greenhouse.ts`, `lever.ts`, `ashby.ts`, `workable.ts`. Selected
+   by the resolved landing host. Encode that ATS's quirks (multi-step flows, the
+   `Attach / Enter manually` resume toggle, custom-question containers).
+2. **Generic label-driven filler** — the fallback for company-wrapped and unknown forms.
+   It enumerates every visible input with its label/aria/placeholder text, then asks Claude
+   Haiku to map that label list onto `answer_bank` keys, returning
+   `{ label, answerKey | null, confidence }`. Anything mapped below threshold, or to
+   `null`, goes to `blocked_fields` rather than being filled on a guess.
+
+Both layers write a `fill_report` naming every field filled, its source key, and every
+field left blocked — so a mis-fill is auditable after the fact.
+
+Per-ATS fillers are modules (`greenhouse.ts`, `lever.ts`, `ashby.ts`, `workable.ts`) with a
 shared `AtsFiller` interface. An `apply_url` matching no known filler produces a task that
 opens the page and reports every field as blocked — still useful, just not filled.
 
