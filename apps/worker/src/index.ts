@@ -107,9 +107,10 @@ export async function processTask(
     }
 
     if (landed.kind === "no-form") {
-      // Live, but not an application: a listing or a search page. A person can
-      // still apply on it, so leave the tab open for them.
-      await session.page.bringToFront();
+      // Live, but not an application: a listing or a search page. The queue row
+      // keeps the URL, so it opens in the person's own browser rather than
+      // leaving this one parked here.
+      await session.close();
       return {
         status: "awaiting_human",
         fillReport: { filled: [], blocked: [] },
@@ -132,6 +133,7 @@ export async function processTask(
     if (shouldAutoSubmit({ authorized: deps.autoSubmit ?? false, blocked: outcome.blocked })) {
       const submission = await submitApplication(session.page);
       if (submission.submitted) {
+        await session.close();
         return {
           status: "applied",
           fillReport: outcome,
@@ -140,9 +142,7 @@ export async function processTask(
           error: null,
         };
       }
-      // The click did not verify. Leave the browser open on whatever the form
-      // is showing so the person can see why and finish it themselves.
-      await session.page.bringToFront();
+      await session.close();
       return {
         status: "awaiting_human",
         fillReport: outcome,
@@ -152,7 +152,7 @@ export async function processTask(
       };
     }
 
-    await session.page.bringToFront();
+    await session.close();
 
     return {
       status: "awaiting_human",
@@ -162,6 +162,7 @@ export async function processTask(
       error: null,
     };
   } catch (error) {
+    await session.close().catch(() => {});
     return {
       status: "failed",
       fillReport: { filled: [], blocked: [] },
@@ -170,7 +171,6 @@ export async function processTask(
       error: error instanceof Error ? error.message : String(error),
     };
   }
-  // The browser is deliberately left open — the user finishes in it.
 }
 
 /** Ceiling on one whole application, browser launch included. */

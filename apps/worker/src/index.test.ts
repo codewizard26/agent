@@ -202,3 +202,23 @@ describe("processTask when the browser will not open", () => {
     expect(result.error).toMatch(/launchPersistentContext/);
   });
 });
+
+describe("processTask browser lifetime", () => {
+  it("closes the browser on every outcome so the queue can keep moving", async () => {
+    // The browser used to be left open whenever a human was needed. Working
+    // through a queue, that leaves one window per stop and — because Chrome
+    // locks its user-data-dir — every later job launches a fresh profile. From
+    // the outside it reads as a tab that opened and hung.
+    const close = vi.fn(async () => {});
+    const result = await processTask(task, {
+      ...deps(),
+      openBrowser: async () => ({
+        context: {} as never,
+        page: fakePage("https://job-boards.greenhouse.io/gitlab/jobs/1"),
+        close,
+      }),
+    });
+    expect(result.status).toBe("awaiting_human");
+    expect(close).toHaveBeenCalled();
+  });
+});
