@@ -13,3 +13,4 @@ node_modules/
 # dist/ is a build artifact nothing imports.
 dist/
 *.tsbuildinfo
+.vercel

@@ -4,6 +4,12 @@ const config: NextConfig = {
   // packages/* ship TypeScript source, not built output — Next must compile them.
   transpilePackages: ["@job-agent/core", "@job-agent/db"],
 
+  // boards.yaml is read at runtime through a computed path, which output file
+  // tracing cannot see. Without this the deployed fetch dies on a missing file.
+  outputFileTracingIncludes: {
+    "/api/**": ["../../sources/**"],
+  },
+
   // PGlite loads its own wasm and filesystem shims at runtime; bundling it
   // breaks that resolution ("path argument must be of type string ... Received
   // an instance of URL"). Keep it external on the server.

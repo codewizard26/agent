@@ -1,5 +1,4 @@
 import fs from "node:fs";
-import path from "node:path";
 import { eq } from "drizzle-orm";
 import { createDb, profiles, jobLedger, type FeedRow } from "@job-agent/db";
 import {
@@ -14,10 +13,7 @@ import {
   type Posture,
 } from "@job-agent/core";
 
-/** boards.yaml lives at the repo root; next runs with cwd = apps/web. */
-function boardsPath(): string {
-  return path.join(process.cwd(), "..", "..", "sources", "boards.yaml");
-}
+import { resolveBoardsPath } from "./boards-path";
 
 export interface FetchPreset {
   timeFrameDays: number | null;
@@ -78,7 +74,7 @@ export async function prepareFetch(
     ),
     client,
     sources: buildSources({
-      boards: loadBoards(fs.readFileSync(boardsPath(), "utf8")),
+      boards: loadBoards(fs.readFileSync(resolveBoardsPath(), "utf8")),
       profile,
       timeFrameDays: preset.timeFrameDays,
       client,
