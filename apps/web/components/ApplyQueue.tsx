@@ -25,9 +25,25 @@ const STATUS_LABELS: Record<string, string> = {
 export function ApplyQueue({ tasks }: { tasks: Task[] }) {
   if (tasks.length === 0) return null;
 
+  // Queueing writes a row and stops. The apply worker is a separate process
+  // driving a real browser, and while it is not running these sit here for
+  // ever — which reads exactly like a broken button unless the page says so.
+  const stalled = tasks.every((task) => task.status === "queued");
+
   return (
     <section className="mt-12">
-      <h2 className="label">{tasks.length} in progress</h2>
+      <h2 className="label">{tasks.length} queued to apply to</h2>
+      {stalled && (
+        <p className="mt-2 max-w-[62ch] text-[13px] text-ink-soft">
+          Nothing is being filled in right now. The apply worker runs as its own
+          process and opens a real browser to fill each form; start it with{" "}
+          <code className="font-mono text-[12px]">
+            pnpm --filter @job-agent/worker start
+          </code>
+          . Nothing is ever submitted for you — the worker fills the form, then
+          stops and hands you the browser.
+        </p>
+      )}
       <ul className="mt-3 space-y-2">
         {tasks.map((task) => {
           const attention = task.status === "awaiting_human" || task.status === "failed";

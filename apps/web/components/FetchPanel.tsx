@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { dismissJob, queueApply } from "../app/actions";
 import {
   linkedInJobsUrl,
@@ -184,6 +185,10 @@ export function FetchPanel({
   const [log, setLog] = useState<string[]>([]);
   const [results, setResults] = useState<RankedResult[]>(initialResults);
   const [running, setRunning] = useState(false);
+  // The queue below this panel is server-rendered from `listApplyTasks`, so a
+  // server action alone leaves it showing the list from page load. Without this
+  // refresh, queueing a job looks like nothing happened.
+  const router = useRouter();
 
   async function run() {
     setRunning(true);
@@ -475,9 +480,10 @@ export function FetchPanel({
                       applyUrl: job.applyUrl,
                     });
                     hide(job.key.slugKey);
+                    router.refresh();
                   }}
                 >
-                  Apply
+                  Queue application
                 </button>
                 <button
                   className="btn btn-quiet"
@@ -491,6 +497,7 @@ export function FetchPanel({
                       applyUrl: job.applyUrl,
                     });
                     hide(job.key.slugKey);
+                    router.refresh();
                   }}
                 >
                   Dismiss
