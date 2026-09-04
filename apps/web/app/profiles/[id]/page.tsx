@@ -35,7 +35,7 @@ export default async function ProfilePage({
   const [tasks, feed] = await Promise.all([listApplyTasks(id), listFeed(db, id)]);
 
   // The board renders from storage, so it is there instantly on load. A fetch
-  // replaces it in place; the 4-hour cron refills it in the background.
+  // replaces it in place; the nightly cron refills it in the background.
   const results = feed.map((row) => ({
     key: { atsKey: row.atsKey, slugKey: row.slugKey },
     company: row.company,
@@ -104,7 +104,7 @@ export default async function ProfilePage({
           </div>
           <div>
             <dt className="text-ink-soft">Next refill</dt>
-            <dd className="mt-0.5 text-[15px]">every 4 hours</dd>
+            <dd className="mt-0.5 text-[15px]">nightly</dd>
           </div>
         </dl>
         <div className="mt-4 flex flex-wrap items-center gap-x-4 text-[13px]">
@@ -120,7 +120,7 @@ export default async function ProfilePage({
       {results.length === 0 && (
         <p className="sheet mb-5 p-4 text-[13px] text-ink-soft">
           Nothing on the board yet. Fetch now, or leave it — the next refill runs
-          within four hours.
+          overnight.
         </p>
       )}
 

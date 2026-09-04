@@ -23,10 +23,10 @@ export interface FetchPreset {
 }
 
 /**
- * What the 4-hour cron runs. Deliberately bounded: measured 2026-08-29, the deep
+ * What the nightly cron runs. Deliberately bounded: measured 2026-08-29, the deep
  * preset takes 4m21s and the route's ceiling is `maxDuration = 300`, so a cron
  * that turned on Hacker News or web search would be killed mid-run and leave a
- * half-written board every four hours. Do not re-enable them here — the manual
+ * half-written board every night. Do not re-enable them here — the manual
  * "Fetch latest" button is where a slow, thorough fetch belongs.
  */
 export const CRON_PRESET: FetchPreset = {

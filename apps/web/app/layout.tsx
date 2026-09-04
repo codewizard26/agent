@@ -16,7 +16,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               Job Agent
             </Link>
             <span className="text-[13px] text-ink-soft">
-              Refills every 4 hours
+              Refills daily
             </span>
           </div>
         </header>
