@@ -3,7 +3,6 @@ import path from "node:path";
 import { createRequire } from "node:module";
 import { neon } from "@neondatabase/serverless";
 import { drizzle as drizzleNeon } from "drizzle-orm/neon-http";
-import { drizzle as drizzlePglite } from "drizzle-orm/pglite";
 import * as schema from "./schema.js";
 
 /**
@@ -71,7 +70,7 @@ export const DDL = `
 `;
 
 /** One PGlite instance per process — Next reloads modules, this must not. */
-let localDb: ReturnType<typeof drizzlePglite<typeof schema>> | null = null;
+let localDb: ReturnType<typeof import("drizzle-orm/pglite").drizzle<typeof schema>> | null = null;
 
 /**
  * PGlite resolves its own wasm through `new URL(..., import.meta.url)`. Next's
@@ -79,9 +78,23 @@ let localDb: ReturnType<typeof drizzlePglite<typeof schema>> | null = null;
  * "path argument must be of type string ... Received an instance of URL".
  * A runtime require bypasses the bundler entirely.
  */
+/**
+ * PGlite and its drizzle adapter are both loaded on demand.
+ *
+ * A static `import ... from "drizzle-orm/pglite"` pulls @electric-sql/pglite in
+ * at module load. That package is not installed in a deployed function, so the
+ * whole module failed to load with "Cannot find module '@electric-sql/pglite'"
+ * before any function body — including the DATABASE_URL guard below — could
+ * run, and every page returned 500 naming a dependency rather than the cause.
+ */
 function loadPGlite(): typeof import("@electric-sql/pglite").PGlite {
   const require = createRequire(import.meta.url);
   return require("@electric-sql/pglite").PGlite;
+}
+
+function loadPgliteDrizzle(): typeof import("drizzle-orm/pglite").drizzle {
+  const require = createRequire(import.meta.url);
+  return require("drizzle-orm/pglite").drizzle;
 }
 
 /**
@@ -94,7 +107,7 @@ export function createLocalDb(dir?: string) {
   fs.mkdirSync(path.dirname(dataDir), { recursive: true });
   const PGlite = loadPGlite();
   const pg = new PGlite(dataDir);
-  localDb = drizzlePglite(pg, { schema });
+  localDb = loadPgliteDrizzle()(pg, { schema });
   void pg.exec(DDL);
   return localDb;
 }
