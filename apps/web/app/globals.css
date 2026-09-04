@@ -1,0 +1,231 @@
+@import url("https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wdth,wght@12..96,75..100,200..800&family=JetBrains+Mono:wght@400;500;700&display=swap");
+@import "tailwindcss";
+
+/*
+ * Dispatch — the board is an operations sheet, not a feed. Type is one
+ * characterful grotesque plus a mono that carries every number, date and
+ * source label, so scanning a column of scores lines up on the digit.
+ */
+@theme {
+  --font-sans: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --color-paper: #e8ebe3;
+  --color-card: #fbfcf9;
+  --color-ink: #14181c;
+  --color-ink-soft: #5a6470;
+  --color-rule: #cbd1c4;
+  --color-rule-soft: #dde1d7;
+  --color-signal: #2340e8;
+  --color-ember: #b3400c;
+  --color-verified: #1f6b3b;
+
+  --radius-card: 4px;
+}
+
+@layer base {
+  html {
+    color-scheme: light;
+  }
+
+  body {
+    background-color: var(--color-paper);
+    color: var(--color-ink);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  :focus-visible {
+    outline: 2px solid var(--color-signal);
+    outline-offset: 2px;
+  }
+}
+
+@layer components {
+  /* Wordmark and page titles: the width axis is where the personality sits. */
+  .display {
+    font-variation-settings: "wdth" 92, "opsz" 48;
+    letter-spacing: -0.03em;
+    line-height: 1.02;
+  }
+
+  .eyebrow {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--color-ink-soft);
+  }
+
+  .sheet {
+    background-color: var(--color-card);
+    border: 1px solid var(--color-rule);
+    border-radius: var(--radius-card);
+  }
+
+  /* Native selects render as OS widgets and would undo the whole toolbar, so
+     the chevron is ours and the arrow well is reserved in the padding. */
+  .select {
+    appearance: none;
+    background-color: var(--color-card);
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 6' fill='none' stroke='%235a6470' stroke-width='1.4'%3E%3Cpath d='M1 1l4 4 4-4'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 10px center;
+    background-size: 10px 6px;
+    border: 1px solid var(--color-rule);
+    border-radius: var(--radius-card);
+    color: var(--color-ink);
+    font-size: 13px;
+    padding: 7px 30px 7px 10px;
+    width: 100%;
+  }
+
+  .select:hover {
+    border-color: var(--color-ink-soft);
+  }
+
+  .input {
+    background-color: var(--color-card);
+    border: 1px solid var(--color-rule);
+    border-radius: var(--radius-card);
+    color: var(--color-ink);
+    font-size: 14px;
+    padding: 8px 10px;
+    width: 100%;
+  }
+
+  .input:hover {
+    border-color: var(--color-ink-soft);
+  }
+
+  .btn {
+    align-items: center;
+    border: 1px solid transparent;
+    border-radius: var(--radius-card);
+    display: inline-flex;
+    font-size: 13px;
+    font-weight: 600;
+    gap: 7px;
+    padding: 8px 14px;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+
+  .btn-primary {
+    background-color: var(--color-ink);
+    color: var(--color-card);
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background-color: var(--color-signal);
+  }
+
+  .btn-primary:disabled {
+    background-color: var(--color-ink-soft);
+    cursor: default;
+  }
+
+  .btn-quiet {
+    border-color: var(--color-rule);
+    color: var(--color-ink);
+  }
+
+  .btn-quiet:hover {
+    border-color: var(--color-ink);
+  }
+
+  .btn-go {
+    background-color: var(--color-verified);
+    color: #fff;
+  }
+
+  .btn-go:hover {
+    background-color: #17532e;
+  }
+
+  .link {
+    text-decoration-color: var(--color-rule);
+    text-decoration-line: underline;
+    text-underline-offset: 3px;
+    transition: text-decoration-color 120ms ease, color 120ms ease;
+  }
+
+  .link:hover {
+    color: var(--color-signal);
+    text-decoration-color: currentColor;
+  }
+
+  .pill {
+    border: 1px solid var(--color-rule);
+    border-radius: 999px;
+    display: inline-flex;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.08em;
+    padding: 2px 8px;
+    text-transform: uppercase;
+  }
+
+  .pill-warn {
+    border-color: color-mix(in srgb, var(--color-ember) 40%, transparent);
+    color: var(--color-ember);
+  }
+
+  .pill-go {
+    border-color: color-mix(in srgb, var(--color-verified) 40%, transparent);
+    color: var(--color-verified);
+  }
+}
+
+/* The signal meter: five steps, lit from the bottom, one step per 20 points.
+   Unranked jobs get no meter at all — an empty meter would read as zero. */
+.meter-step {
+  background-color: var(--color-rule-soft);
+}
+
+.meter-step-lit {
+  background-color: var(--color-signal);
+}
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.row-in {
+  animation: row-in 320ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+}
+
+/* While a fetch streams, the primary action reads as busy rather than dead. */
+@keyframes scan {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: 24px 0;
+  }
+}
+
+.scanning {
+  background-image: repeating-linear-gradient(
+    115deg,
+    transparent 0 10px,
+    rgba(255, 255, 255, 0.16) 10px 12px,
+    transparent 12px 24px
+  );
+  animation: scan 700ms linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .row-in,
+  .scanning {
+    animation: none;
+  }
+}

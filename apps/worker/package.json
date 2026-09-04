@@ -1,0 +1,21 @@
+{
+  "name": "@job-agent/worker",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "capture": "tsx scripts/capture.ts"
+  },
+  "dependencies": {
+    "@job-agent/core": "workspace:*",
+    "@job-agent/db": "workspace:*",
+    "drizzle-orm": "^0.36.0",
+    "playwright-core": "^1.48.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0"
+  }
+}

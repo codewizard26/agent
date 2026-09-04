@@ -2,3 +2,9 @@ node_modules/
 .next/
 .env*
 !.env.example
+# Candidate dumps are job listings, no secrets — kept in the repo so a fetch
+# run is reviewable from anywhere. The deployed app does not read them.
+!.candidates/
+# Anchored: the resume/profile data lives in ./profiles, but an unanchored
+# rule also hid apps/web/app/profiles, which kept Tailwind from scanning it.
+/profiles/

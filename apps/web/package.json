@@ -1,0 +1,36 @@
+{
+  "name": "@job-agent/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "seed": "tsx --env-file-if-exists=.env scripts/seed.ts",
+    "discover": "tsx --env-file-if-exists=.env scripts/discover.ts",
+    "candidates": "tsx --env-file-if-exists=.env scripts/candidates.ts",
+    "resume-text": "tsx --env-file-if-exists=.env scripts/resume-text.ts",
+    "add-profile": "tsx --env-file-if-exists=.env scripts/add-profile.ts"
+  },
+  "dependencies": {
+    "@job-agent/core": "workspace:*",
+    "@job-agent/db": "workspace:*",
+    "drizzle-orm": "^0.36.0",
+    "next": "^15.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "yaml": "^2.5.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "@tailwindcss/postcss": "^4.0.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "postcss": "^8.4.0",
+    "tailwindcss": "^4.0.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "unpdf": "^0.12.0"
+  }
+}

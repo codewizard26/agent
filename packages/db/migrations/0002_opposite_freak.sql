@@ -1,0 +1,1 @@
+ALTER TABLE "profiles" ADD COLUMN "feed_time_frame_days" integer DEFAULT 7;

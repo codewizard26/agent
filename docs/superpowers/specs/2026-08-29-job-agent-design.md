@@ -33,7 +33,11 @@ the final submit click remains.
   as-is. Free-text questions are not auto-answered — the apply task halts and waits.
 - Ingesting from LinkedIn, Indeed, Glassdoor, ZipRecruiter, or Naukri. Prohibited by their
   terms, defended by anti-bot systems, and automating them from a user's own logged-in
-  account puts that account at risk. They stay manual discovery surfaces.
+  account puts that account at risk. They stay manual discovery surfaces. The sanctioned
+  form of that is a *deep link*: the feed panel offers prefilled LinkedIn and Naukri
+  searches built from the profile's own keywords, and every job row links to the people
+  at that company on LinkedIn. The user browses and connects as themselves; the app never
+  fetches, parses, or stores a byte from either site.
 - **Ingesting X/Twitter through its API.** `api.twitter.com/2/tweets/search/recent` returns
   401 unauthenticated and the free tier carries no search endpoint at all; search starts at
   the paid Basic tier. X hiring posts are reached instead as indexed pages through the
@@ -70,7 +74,7 @@ and far more stable than 100 bespoke scrapers.
 | `remoteok` | `GET remoteok.com/api` | 200 |
 | `arbeitnow` | `GET www.arbeitnow.com/api/job-board-api` | 200 |
 | `hn_whoishiring` | `GET hn.algolia.com/api/v1/search` | 200 |
-| `websearch` | Claude `web_search_20260209` server tool | Runs on Anthropic infrastructure — no Google API key, no second vendor |
+| `websearch` | OpenAI Responses `web_search` tool | Runs on the provider's infrastructure — no Google API key, no second vendor |
 | `bluesky` | `POST bsky.social/xrpc/com.atproto.server.createSession` then `app.bsky.feed.searchPosts` | Public search returns 403 unauthenticated; `createSession` answers correctly on bad credentials, so a free account plus an app password unlocks it |
 
 Board tokens 404 when a company is not on that provider (`plaid` on Lever, `uniswaplabs`
@@ -186,7 +190,7 @@ decision and would additionally require `auto_submit_authorized`.
            ├─ time-frame filter on verified post date        in memory
            ├─ profile-derived filter (§7.2)                  in memory
            │       ~3000 → ~120
-           ├─ Claude rank (Sonnet, batched)                  ~5-15s
+           ├─ rank (RANK_MODEL, batched)                     ~60-180s
            └─ render ranked cards
 ```
 
@@ -238,7 +242,7 @@ profiles demonstrate why:
 | **Rejects** | `intern`, `junior`, `new grad`, `staff`, `principal`, `director`, `EM` | `senior`, `staff`, `principal`, `lead`, `manager`, `5+ years` |
 | Core stack | TypeScript, React, Next.js, Node, Express, GraphQL, PostgreSQL, MongoDB, Django | React, Next.js, Node, Express, MongoDB, JavaScript, Python, C#, ASP.NET, MySQL, Tailwind |
 | Bonus signal | Solidity, EVM, Cosmos, DeFi (scores up, never gates) | — |
-| Posture | remote-global, no sponsorship needed | **unset** — defaults to `india + remote` |
+| Posture | remote-global, no sponsorship needed | **India only** — `regions: ["india"]`, set by the operator |
 
 The approved earlier draft hardcoded a mid/senior band and rejected `new grad`. Applied to
 profile 2 that returns an empty feed — she is a 2026 graduate and those are her *target*
@@ -248,20 +252,31 @@ Remaining filter rules, all profile-scoped:
 
 - **Geography** — reject postings gated outside the profile's posture: `US only`,
   `must reside in`, `must be authorized to work in`, `requires security clearance`,
-  on-site listings outside the profile's region.
+  on-site listings outside the profile's region. The region test reads
+  `posture.regions` directly: `"india"` admits roles located in India, `"remote"` admits
+  remote roles wherever based, and a posture carrying only `"india"` therefore rejects
+  remote-anywhere roles. India matching here is *strict* — `india` and the Indian cities,
+  never the `apac` / `asia` / `ist` markers, which name regions that merely cover India
+  and would readmit the surrounding continent. Those broader markers still drive India
+  *ordering* (§7.2), which admits nothing on its own.
 - **Timezone** — reject hard overlap requirements incompatible with IST. Ranges that
   overlap at all pass through to ranking.
 - **Stack overlap** — at least 2 matches against the profile's core stack.
 - **Time frame** — post date within the selected window, using only true post dates (§5.1).
 - **Ledger** — not applied, not dismissed, for this profile.
 
-Profile 2's posture is unset rather than inferred. It defaults to `india + remote` and is
-confirmed by its owner; the app does not guess someone's work-authorization posture from
-their resume.
+Profile 2's posture is never inferred from her resume — the app does not guess anyone's
+work-authorization posture from a CV. It shipped as the `india + remote` default and was
+then narrowed to `regions: ["india"]` on the operator's instruction, which drops
+remote-anywhere roles and leaves only roles located in India. That is a deliberately
+strict setting: most of the ingested boards (Remotive, Himalayas, Jobicy, RemoteOK,
+Arbeitnow) are remote-first, so a large share of their intake no longer reaches her feed.
+The India-native sources — Instahyre above all — and the India offices on the company
+boards are what fill it instead.
 
 ### 7.3 Claude rank
 
-Survivors batch 20 per call to `claude-sonnet-5` with the profile's parsed resume and a
+Survivors batch 20 per call to `RANK_MODEL` with the profile's parsed resume and a
 structured-output tool schema:
 
 ```ts
@@ -281,7 +296,7 @@ structured-output tool schema:
 is too varied for regex, which is exactly why it belongs here and not in §7.2.
 
 `hn_whoishiring` needs a model at ingest too: thread comments are freeform, so
-`claude-haiku-4-5` parses each into
+`UTILITY_MODEL` parses each into
 `{company, title, location, remote, applyUrl, stack[], postedAt}`. Non-job comments drop.
 
 ## 8. Profiles and the answer bank
@@ -301,7 +316,7 @@ graduation year, employers, links. Computed once at upload, cached, and it drive
 - Profile 1 — `nikhil_resume_december.pdf`, posture `remote-global / no sponsorship`,
   answer bank filled by its owner.
 - Profile 2 — `fullstackresume.pdf` (Shambhavi Soumya), `auto_submit_authorized: false`,
-  posture unset (defaults `india + remote`), **answer bank empty**.
+  posture `regions: ["india"]` — India-located roles only, **answer bank empty**.
 
 ### 8.1 Answer bank
 
@@ -344,7 +359,7 @@ Profile 2 belongs to a different person. Applications under it carry their name 
 - Its answer bank must be filled by its owner, not inferred. Work authorization,
   compensation, notice period, and EEO values start empty and halt on first use.
 - Its resume PDF and PII live in this project's database and go nowhere else. Model calls
-  send resume text to the Anthropic API for parsing and ranking; nothing goes to any other
+  send resume text to the model provider for parsing and ranking; nothing goes to any other
   third party.
 
 ## 9. Apply flow
@@ -376,7 +391,7 @@ Two layers:
    `Attach / Enter manually` resume toggle, custom-question containers.
 2. **Generic label-driven filler** — fallback for company-wrapped and unknown forms. It
    enumerates every visible input with its label/aria/placeholder text, then asks
-   `claude-haiku-4-5` to map that label list onto `answer_bank` keys, returning
+   `UTILITY_MODEL` to map that label list onto `answer_bank` keys, returning
    `{ label, answerKey | null, confidence }`. Anything below threshold, or `null`, goes to
    `blocked_fields` rather than being filled on a guess.
 
@@ -441,16 +456,27 @@ packages/core  adapters, normalize, job-key, filters, rank prompts, shared
 ```
 
 - **Vercel**: web app, Neon Postgres (Marketplace) holding only §4's three tables. **No cron
-  jobs** — fetching is user-initiated. The Anthropic API key is server-side only.
+  jobs** — fetching is user-initiated. The model API key is server-side only.
 - **Local**: the worker, on the same database over a pooled connection. Browser session
   cookies never leave the machine.
 - Models are a single exported constant, `packages/core/src/models.ts`, so swapping is one
-  line. Defaults: `claude-opus-5` for ranking (judgment work), `claude-haiku-4-5` for the
-  mechanical calls — resume extraction, HN comment parsing, generic field mapping.
-  Ranking ~120 jobs costs roughly $0.90/fetch on Opus, $0.36 on Sonnet, $0.18 on Haiku;
-  changing `RANK_MODEL` to `claude-sonnet-5` is the cost lever if fetches get frequent.
-- Structured model output uses `client.messages.parse()` with `zodOutputFormat` — never
-  hand-parsed JSON out of a text block.
+  line. Defaults: `gpt-5` for ranking (judgment work), `gpt-5-mini` for the
+  cheap extractions (resume, HN comments, Bluesky posts, form-label mapping).
+  Ranking is the only cost that scales with feed size; `RANK_MODEL` is the lever if
+  fetches get frequent. Measured 2026-08-29: 3 jobs in one batch at high reasoning
+  effort took 60s, so ~41 jobs across 3 parallel batches lands near 2-4 minutes.
+  Measured end-to-end on 2026-08-29: `POST /api/fetch` at a 7-day window took 4m21s —
+  12,545 fetched, 7,727 deduped, 35 kept, **35/35 ranked**. Keyless `pnpm candidates`
+  over the same window takes 20s, since it skips hn, websearch and ranking. Note the
+  4m21s figure exceeds the route's own `maxDuration = 300`, which only bites on a
+  Vercel deploy — locally there is no ceiling.
+- Every model call goes through the `LlmClient` interface in `packages/core/src/llm.ts`,
+  never a provider SDK directly. `parse()` is structured output (`responses.parse` with
+  `zodTextFormat`); `searchWeb()` is grounded generation. No hand-parsed JSON out of text.
+- The Responses API counts reasoning tokens against `max_output_tokens`, and a response
+  that runs out returns `output_parsed: null` — not an error. `llm.ts` throws on
+  `status === "incomplete"` so an undersized budget cannot masquerade as a refusal, and
+  `rankJobs` logs how many batches failed rather than silently returning fewer rankings.
 
 ## 14. Cycle boundaries
 
@@ -477,3 +503,327 @@ halt for text fields.
 | ATS form DOM changes break fillers | Label-driven matching, not selectors; degrades to "opens page, reports blocked fields" |
 | Filter over-rejects, feed looks empty | Rejected postings retained in the response with a rejection reason, viewable behind a toggle, so the filter is auditable |
 | Upstream API shape changes | Adapters isolated; `test:live` canary; contract tests fail loudly |
+| Form fields silently unmapped | `mapLabelsToKeys` matches on field **index**, never an echoed label. Matching on the label mapped nothing at all: the prompt decorates labels with their type, and a model echoing `First Name (text, required)` never equals `First Name` |
+| hn source alone exceeds the 300s route ceiling | 782 comments at ~471ms each (concurrency 8) is 368s. Capped at `HN_COMMENT_LIMIT = 200` in `sources.ts` |
+| One slow board sets the pace for all 58 | `DEFAULT_SOURCE_TIMEOUT_MS = 15s` per source. Measured 2026-08-29: the Lever aggregator `jobgether` (4,203 postings) took 42.7s while every other source finished inside 13s — it alone was 94% of fetch wall clock. Model-backed sources carry their own `timeoutMs` (240s), since a budget sized for an HTTP board kills every one of them |
+| Model calls fanned out per item hit rate limits | hn and bluesky parse through `mapWithConcurrency` at `MODEL_CONCURRENCY = 8`, not `Promise.all` over every item |
+
+## 16. The keyless path (added 2026-08-29)
+
+A model API key is a separate purchase from a Claude Pro subscription, so the pipeline is
+split so the paid half is optional rather than required. The paid half now runs on OpenAI
+(`OPENAI_API_KEY`); the free half runs on no key at all.
+
+Only two steps in this system need a model: parsing a resume into a `ParsedProfile`, and
+ranking filtered jobs. Everything between them — fanning out to sources, dedupe, the
+time-frame window, and the profile-derived Tier 1 filter — is pure code. `collectCandidates()`
+in `packages/core/src/pipeline.ts` is exactly that middle, and it deliberately takes no
+model client. `runFetch()` is `collectCandidates()` plus ranking.
+
+`buildSources()` in `packages/core/src/sources.ts` is the single definition of the source
+list, shared by both callers. Its `client` is optional: without one it omits
+`MODEL_BACKED_SOURCES` (`hn`, `websearch`, `bluesky`) and returns the pure-HTTP set.
+
+Two ways to run a fetch, sharing every adapter, the job key, the filter and the ledger:
+
+| | Web app (`POST /api/fetch`) | CLI (`pnpm candidates`) |
+|---|---|---|
+| Resume parsing | `pnpm seed`, via `UTILITY_MODEL` | Claude Code reads `pnpm resume-text` output, writes a profile JSON; `pnpm add-profile` inserts the row |
+| Sources | 12 kinds, model-backed included | 9 kinds, model-backed omitted |
+| Ranking | `rankJobs()` via `RANK_MODEL` (`gpt-5`) | Claude Code, in conversation |
+| Needs `OPENAI_API_KEY` | yes | no |
+
+The CLI writes `candidates.json` (full records, for the apply step) and
+`candidates.brief.md` (for reading in conversation). The brief is rendered by `profileBrief()`
+and `jobBrief()` — the same functions `rankJobs()` sends to the API — so the field set and its
+ordering cannot drift. The text is not byte-identical: the CLI truncates descriptions harder
+(800 chars vs 2000) and prefixes each job with a `source | posted | apply` line for the human
+reader.
+
+Ordering on the keyless path uses `sortByIndiaPriority()`: India-located first, then
+India-eligible, then the rest. `runFetch()` keeps its own rank-aware version of the same
+rule. Both are ordering, never filtering.
+
+A profile JSON is validated against `ParsedProfileSchema` and `PostureSchema` on load, so a
+hand-written profile fails with a field path rather than silently filtering nothing. The CLI
+reads the database but never writes to it; with no matching profile row the ledger is empty
+and it says so, because an empty ledger means applied jobs reappear.
+
+**India term matching is whole-word.** It was substring matching until a live run put
+California roles above a Mumbai one: `Specialist`, `Scientist` and `Administrator` all
+contain the `ist` timezone marker, `Apache` contains `apac`, and `Indiana` contains `india`.
+
+
+## 17. The persisted board (added 2026-08-29)
+
+**This reverses an earlier constraint.** §14 and the original brief said on-demand fetching
+with nothing stored. The user changed that once Neon was connected: the board is now
+persisted and refreshed on a schedule, with on-demand fetch kept alongside it. Read §16's
+"writes nothing" as applying to `collectCandidates` and the CLI, not to the web app.
+
+`feed_jobs` holds what the board renders — no `descriptionText`, which is most of a fetch's
+bytes and is never shown. Two writers:
+
+| | `/api/cron/fetch` | `/api/fetch` |
+|---|---|---|
+| Trigger | `vercel.json` cron, `0 */4 * * *` | the "Fetch latest jobs" button |
+| Preset | `CRON_PRESET` — 7 days, rank 25, no model sources | whatever the four UI controls say |
+| Measured | 2m12s for two profiles | 20s fast / 4m21s deep |
+
+Profiles refresh in parallel. Sequentially two profiles took 3m03s against the 300s
+ceiling — a third would have exceeded it, because every profile re-fetches the same 58
+sources. Parallel is 2m12s. If this ever grows past a handful of profiles the real fix is
+fetching once and filtering per profile, not more parallelism.
+
+The cron preset is bounded on purpose: the deep preset takes 4m21s against a
+`maxDuration = 300` ceiling, so a cron with Hacker News or web search enabled would be
+killed mid-run and leave a half-written board every four hours.
+
+Rows upsert rather than replace, so `firstSeenAt` survives and a job does not read as new
+after every refresh. Matching uses the same dual key as the ledger: rows sharing an
+`atsKey` are cleared before insert, because a job's slug can normalize differently between
+fetches while its ATS identity holds still — without that the board shows one posting
+twice. Verified 2026-08-29: two consecutive cron runs both reported 35 jobs, and the board
+stayed at 35.
+
+Applying or dismissing deletes the feed row as well as writing the ledger row. The ledger
+only keeps a job out of the *next* fetch; without the delete, a job the user already
+handled sits on the board until the cron next runs.
+
+`CRON_SECRET` gates the route. Unset locally it is open, for `curl localhost:3000/api/cron/fetch`;
+unset on a Vercel deploy the route refuses with a 500, because every call spends ranking
+money and a public URL that bills the user is not an acceptable default.
+
+**Ranking effort is the dominant cost of a fetch, not the source count.** Measured on the
+same 10 jobs: `low` 35s, `medium` 66s, `high` 113s, with low and medium agreeing within ~2
+points per job. `rankJobs` defaults to `medium`. The four UI controls (time frame, source
+depth, board cap, rank limit) matter less than that one parameter.
+
+
+## 18. Geography applies to both postures (corrected 2026-08-29)
+
+The geography check used to be gated on `posture.remoteGlobal`, which inverted its own
+intent: the remote-global profile got the strict rule ("remote, or on-site in India") and
+the India-only profile got **no geography filter at all** — the looser outcome, for the
+candidate with the narrower posture. Adding the second profile is what surfaced it; her
+feed would have been full of on-site roles in Austin and Berlin.
+
+The rule now reads the same for everyone: an on-site role is viable only where the
+candidate already is. `remoteGlobal` says whether remote work may be for any employer, not
+whether relocation is on the table. Both seeded profiles are India-based, so an on-site
+role in India passes and an on-site role elsewhere does not.
+
+The two profiles are the regression test for everything profile-derived. From one fetch of
+the same 12,749 postings on 2026-08-29: Nikhil (mid/senior, 5 years) kept 35, Shambhavi
+(entry/junior, May 2026 graduate) kept 24. Their `titlesReject` lists are near-exact
+complements — hers rejects `senior`, `staff`, `lead`; his rejects `new grad`, `junior`,
+`sde 1` — from the same code path, which is the point of deriving them.
+
+Shambhavi ships with an **empty answer bank** and `auto_submit_authorized: false`. Her name
+goes on those applications, so work authorization, compensation, notice period and EEO
+answers have to come from her, not be inferred.
+
+
+## 19. Per-profile fetch window (added 2026-08-29)
+
+`profiles.feed_time_frame_days` sets how far back the cron looks, per profile. NULL means
+"any" — the only window that also admits the undated sources (Ashby, Instahyre). The cron
+takes its window from the profile and everything else from `CRON_PRESET`.
+
+It is per profile because the two profiles need different windows to fill a board. At 7
+days Shambhavi (entry/junior) kept 24; at 30 days she keeps **96**, while Nikhil stays at
+35 on 7 days. A fresh graduate simply sees fewer new postings per day from this source set.
+The profile page states the active window, and a manual fetch starts from it.
+
+Widening costs nothing extra in ranking: `CRON_PRESET.rankLimit = 25` caps how many are
+scored regardless of how many are kept. The remainder sit on the board unranked.
+
+**The schema was defined three times** — `schema.ts`, the DDL in `client.ts`, and a
+drifted copy in `test-db.ts` that never received `feed_jobs` at all. `client.ts` now
+exports the one DDL and the test harness applies it, so a table or column added once
+reaches dev databases and tests together.
+
+That DDL also carries `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` lines. `CREATE TABLE IF
+NOT EXISTS` does nothing to a table that already exists, so a column added later never
+reached a local database created before it — surfacing as `column ... does not exist` in
+dev and in the suite, never as a migration error. Every new column needs a line there too.
+
+
+## 20. India-only posture and the India source wall (added 2026-08-31)
+
+Shambhavi's posture narrowed from `india + remote` to `regions: ["india"]`. Three things
+had to change for that setting to mean anything.
+
+**`posture.regions` was dead data.** It was declared in `Posture`, validated by
+`PostureSchema`, asserted in tests, written by both seed paths — and read by nothing. The
+geography gate keyed off `job.remote` and `indiaPriority` alone, so editing `regions` to
+`["india"]` would have changed the stored row and not one posting in the feed. The gate
+now reads `regions` and `remoteGlobal` stays out of it, per §18.
+
+**`isIndiaLocated` was too loose to gate on.** Its term list carries `apac`, `asia` and
+`ist` alongside India and its cities. Those are correct for *ordering* — a role open to
+APAC is genuinely closer to reachable than one in Ohio — and wrong for a gate, where a
+Singapore "Backend Engineer, APAC" would pass as India-located and readmit the region the
+gate exists to cut. The list is now split: `INDIA_STRICT_TERMS` (India and its cities) for
+the region gate, the broader list for `sortByIndiaPriority`.
+
+`isIndiaLocatedStrict` also stops reading `locationRestrictions`. A remote posting
+restricted to India is one an Indian candidate may *take* — that is `isIndiaEligible`'s
+question — but it is not a role located in India, and reading restrictions here would
+readmit remote-anywhere-but-India roles through the back door. It reads `locationRaw` and
+`title` only, and like `isIndiaLocated` it never reads `descriptionText`, so a posting
+whose location says "Remote" and whose body mentions a Bangalore office is dropped. Two
+accepted costs of the strict setting, both deliberate.
+
+Behaviour under each posture:
+
+| Posting | `["india"]` | `["india","remote"]` | `["remote"]` |
+|---|---|---|---|
+| On-site Bangalore | pass | pass | pass |
+| Remote, location "Remote - India" | pass | pass | pass |
+| Remote, restrictions `["India"]` | **reject** | pass | pass |
+| Remote anywhere | **reject** | pass | pass |
+| On-site San Francisco | reject | reject | reject |
+| "Engineer, APAC", Singapore | reject | reject | reject |
+
+The `["remote"]` column is Nikhil's posture and is unchanged from before this section —
+on-site India still reaches him through `indiaPriority`.
+
+**Only the live row matters.** `seed.ts` inserts, it does not upsert, and it re-parses both
+resumes through a model. The row was updated with `pnpm add-profile --profile
+profiles/shambhavi.json`, which needs no API key and leaves `auto_submit_authorized`
+alone. `seed.ts` was updated too, for the next fresh database.
+
+### 20.1 The India source wall
+
+"Add more India job APIs" was probed on 2026-08-31 before being planned. It came back
+mostly negative, and the walls are recorded here so the next attempt starts from evidence:
+
+| Source | Result |
+|---|---|
+| Instahyre | **200** — already integrated, and still the one India-native source that works |
+| Cutshort | 401 — authentication required |
+| Hirist | 404 — no public API |
+| Wellfound | 404 — no public API |
+| Internshala | 404 — no public API |
+| Jooble | 403 — API key required |
+| Findwork | 401 — API key required |
+| Adzuna India | 400 — endpoint live, needs a free `app_id` / `app_key` |
+| TheMuse | 200, but unusable as-is |
+
+TheMuse deserves the detail. Its `location` parameter is decorative: `location=Bangalore,
+India` returns 8,875 results whose first page is SpaceX in El Segundo, Optum in the US and
+a spread of "Flexible / Remote". The per-job `locations` array is clean, so India roles
+could be recovered by post-filtering — but that means fetching several city queries of
+mostly-noise to surface roles like "Team Leader-R" that fail the two-core-stack gate
+anyway. Not built.
+
+One piece of collateral from the strict gate lands here. `normalizeInstahyre` sets
+`locationRaw` from the posting's `locations` field, so its rows pass the India-only gate on
+their city — but a row whose `locations` reads "Remote" now falls outside the gate, even
+though Instahyre is an India-only marketplace where that role is definitionally hiring in
+India. The remote-first boards are unaffected in the same way: Remotive, Himalayas and
+Jobicy all write the restriction string into `locationRaw`, so an India-restricted role
+there still reads as India-located. The gap is specific to remote-labelled Instahyre rows.
+
+**Adzuna India is the real unlock** and the one worth doing next: free tier, genuine India
+coverage, one adapter, blocked only on registering for a key.
+
+Until then, the India-only feed is fed by Instahyre plus the India offices on the company
+boards. Instahyre exposes no post date, so it joins **only** an unbounded fetch — an
+India-only profile should run the "Any (includes undated sources)" window to see it at
+all. Relaxing that per posture was considered and cut: the gate lives in `buildSources`,
+which takes `profile` but not `posture`, and threading posture through would ripple into
+`candidates.ts`, `feed-fetch.ts` and the fetch route for a setting the window already
+controls.
+
+
+## 21. Role families, and why LinkedIn and Naukri never arrived (added 2026-08-31)
+
+Two complaints, one about noise and one about coverage. They had separate causes and the
+second one had two.
+
+### 21.1 Nothing checked what kind of job it was
+
+`deriveTitleKeywords` answers *how senior* a posting is. Nothing answered whether it was a
+software engineering role at all. The filter rejected on `titlesReject` — seniority words —
+and then asked for two core-stack matches anywhere in title, location and description. A
+recruiter, sales or customer-success posting at a React shop clears both: the employer's own
+boilerplate lists React and Node, and "Technical Recruiter" contains no seniority word.
+"Team Leader-R" and "Senior Training Specialist", both real results, arrived exactly this way.
+
+`roles.ts` adds the missing axis. `isEngineeringRole` reads the **title only** — the
+description is where the false positives live, and the title is the field that does not lie.
+`ROLE_TERMS` includes bare "engineer" and "developer" so that "Backend Engineer II" and
+"Developer, Payments" match; `NON_ENGINEERING_TERMS`, checked first, is what keeps those two
+honest against Sales Engineer, Solutions Engineer and Technical Recruiter.
+
+`deriveRoleFamilies` reads the resume's stack and returns the titles to search for:
+"software engineer" always, plus frontend, backend and — when both appear — full stack. The
+web search queries used to hardcode "full stack developer", which is one person's title.
+
+### 21.2 The web search source was switched off by default
+
+`buildSearchQueries` has always carried `site:naukri.com`, `site:wellfound.com` and
+`site:hirist.tech`. They had simply never run. Web search sat behind `skipModelSources`
+alongside Hacker News and Bluesky, and the panel defaults to Fast, which drops all three.
+
+Hacker News and Bluesky belong there — one model call per comment or post, minutes per
+fetch. Web search does not: two calls total, one to search and one to structure, no matter
+how many postings come back. It now runs on every fetch that has a client, and
+`DEEP_ONLY_SOURCES` names the two that Fast still skips. `site:linkedin.com/jobs` joins the
+query list.
+
+This stays inside §3. Nothing logs into LinkedIn or Naukri and nothing fetches them
+directly — their postings are reached as pages a search engine has already indexed, which is
+the same route §3 defines for X. The prefilled LinkedIn and Naukri links from §20 remain as
+a fallback, not as the mechanism.
+
+**LinkedIn works; Naukri is unproven.** Across three live runs on 2026-08-31 LinkedIn
+returned postings every time (3, then 2, then 1). Naukri returned **zero in all three**. A
+direct probe explains why: `site:naukri.com "software engineer" India` returns nothing, and
+so does a stack-qualified variant, while the bare `site:naukri.com frontend developer jobs`
+returns a listing. Naukri's job pages are thinly indexed, and the query as first written —
+a quoted role OR-chain plus four stack terms plus a recency phrase — over-constrained it to
+nothing. The Naukri query is now deliberately the loosest of the seven: one role, no stack,
+no recency. That has not yet produced a Naukri result in a full run, so Naukri coverage
+should be treated as **not demonstrated**. The other India sites reached by the same route —
+Cutshort, Hirist and Wellfound — return consistently, so the route itself is sound.
+
+### 21.3 The filter rejected search results on evidence that did not exist
+
+Ungating the source was not enough. The first live run returned 7 postings, 3 of them from
+LinkedIn, and kept **one**. Two died on "fewer than 2 core stack matches".
+
+The adapter had been writing `descriptionText: "Found via web search on <page>"` — a
+provenance sentence in the field that holds the job description. The stack filter read that
+sentence, found no React and no Node in it, and rejected the posting. Every LinkedIn and
+Naukri result was structurally incapable of passing, because a search result has a title and
+no description at all.
+
+Two changes. The adapter now writes `descriptionText: ""`, since provenance already lives in
+`sourceKind` and the apply URL. The filter applies the stack gate only when there is
+description text to read: absent evidence, the role and seniority gates stand on their own
+and the ranker scores the rest. This is the rule `isIndiaEligible` already follows for an
+empty restriction list — an empty field means unknown, never "no".
+
+The rule is written for web search but applies to **any** description-less row, and several
+adapters can produce one: a Greenhouse, Lever or Ashby posting with empty `content`, a
+Himalayas row with neither description nor excerpt, and — the volume case — an Instahyre row
+whose `keywords` array is absent, since its description is that array joined. Those rows now
+clear the stack gate on their title alone. The role gate from §21.1 is what carries the
+weight there, and for Instahyre in particular a title-only "Frontend Developer" in Bangalore
+is a genuine match rather than a leak.
+
+Measured after the fix, same profile and window: **14 postings, 13 kept** — LinkedIn 2,
+Wellfound 3, Cutshort 2, Hirist 1, the rest company career pages. Every one India-located
+and on her stack. The single rejection was an internship. A third run after the Naukri query
+was loosened returned 8, kept 7, again all India and all on her stack.
+
+### 21.4 What the role gate excludes
+
+`isEngineeringRole` needs a title term to match, so titles that name the work without ever
+saying engineer, developer, SDE, SWE or a framework are dropped. "Member of Technical Staff"
+is the notable one — common at Indian product companies — along with "Technical Analyst".
+"Programmer Analyst" passes on `programmer`. These are accepted losses: widening the accept
+list far enough to catch them readmits the non-engineering titles the gate exists to cut.

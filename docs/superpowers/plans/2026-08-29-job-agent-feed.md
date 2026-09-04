@@ -175,8 +175,8 @@ export default defineConfig({
   "main": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
   "dependencies": {
-    "@anthropic-ai/sdk": "^0.70.0",
-    "zod": "^3.23.0",
+    "@anthropic-ai/sdk": "^0.122.0",
+    "zod": "^4.0.0",
     "yaml": "^2.5.0"
   }
 }
@@ -610,7 +610,6 @@ Create `packages/db/src/test-db.ts`:
 ```typescript
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
-import { sql } from "drizzle-orm";
 import * as schema from "./schema.js";
 
 export interface TestDb {
@@ -627,7 +626,9 @@ export async function createTestDb(): Promise<TestDb> {
   const pg = new PGlite();
   const db = drizzle(pg, { schema });
 
-  await db.execute(sql`
+  // pg.exec, not drizzle's db.execute: drizzle prepares the statement and
+  // PGlite rejects "multiple commands into a prepared statement".
+  await pg.exec(`
     CREATE TABLE profiles (
       id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
       name text NOT NULL,
@@ -2973,7 +2974,7 @@ git commit -m "test: live endpoint canary suite"
   "dependencies": {
     "@job-agent/core": "workspace:*",
     "@job-agent/db": "workspace:*",
-    "@anthropic-ai/sdk": "^0.70.0",
+    "@anthropic-ai/sdk": "^0.122.0",
     "next": "^15.0.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

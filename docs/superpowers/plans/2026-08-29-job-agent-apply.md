@@ -618,9 +618,10 @@ git commit -m "feat: apply queue with explicit mark-applied confirmation"
   "dependencies": {
     "@job-agent/core": "workspace:*",
     "@job-agent/db": "workspace:*",
-    "@anthropic-ai/sdk": "^0.70.0",
+    "@anthropic-ai/sdk": "^0.122.0",
     "playwright-core": "^1.48.0",
-    "drizzle-orm": "^0.36.0"
+    "drizzle-orm": "^0.36.0",
+    "zod": "^4.0.0"
   },
   "devDependencies": { "tsx": "^4.19.0" }
 }
@@ -1380,7 +1381,7 @@ export const greenhouseFiller: AtsFiller = {
       const key = matchAnswerKey(field.label);
       const value = key ? ctx.answers.get(key) : undefined;
 
-      if (!value) {
+      if (!key || !value) {
         // Company-specific questions and unanswered keys both land here.
         blocked.push(field.label);
         continue;
@@ -1391,7 +1392,7 @@ export const greenhouseFiller: AtsFiller = {
       } else {
         await ctx.page.fill(field.selector, value).catch(() => {});
       }
-      filled.push({ label: field.label, answerKey: key! });
+      filled.push({ label: field.label, answerKey: key });
     }
 
     return { filled, blocked };
