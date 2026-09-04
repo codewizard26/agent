@@ -10,6 +10,7 @@ import { workableFiller } from "./fillers/workable.js";
 import { createGenericFiller } from "./fillers/generic.js";
 import type { AtsFiller, FillOutcome } from "./fillers/types.js";
 import { shouldAutoSubmit, submitApplication } from "./submit.js";
+import { resolveResumePath } from "./resume.js";
 
 export interface ApplyTaskRow {
   id: string;
@@ -173,7 +174,10 @@ export async function runWorkerLoop(): Promise<void> {
       openBrowser: openWorkerBrowser,
       fillers,
       answers,
-      resumePath: profile?.resumeBlobUrl ?? process.env.RESUME_PATH!,
+      resumePath: resolveResumePath({
+        name: profile?.name ?? task.profileId,
+        resumeBlobUrl: profile?.resumeBlobUrl ?? null,
+      }),
       autoSubmit: profile?.autoSubmitAuthorized ?? false,
     });
 

@@ -54,8 +54,15 @@ export function createLabelFiller(
 
       for (const field of fields) {
         if (field.type === "file") {
-          await ctx.page.setInputFiles(field.selector, ctx.resumePath).catch(() => {});
-          filled.push({ label: field.label, answerKey: "resume" });
+          // A swallowed failure here is an application submitted with no
+          // resume attached, which auto-submit would send without anyone
+          // noticing. Report it as blocked so the task goes to a human.
+          const uploaded = await ctx.page
+            .setInputFiles(field.selector, ctx.resumePath)
+            .then(() => true)
+            .catch(() => false);
+          if (uploaded) filled.push({ label: field.label, answerKey: "resume" });
+          else blocked.push(`${field.label} (resume upload failed)`);
           continue;
         }
         const key = map[field.label.trim().toLowerCase()];
