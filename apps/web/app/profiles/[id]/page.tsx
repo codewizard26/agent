@@ -82,7 +82,7 @@ export default async function ProfilePage({
   return (
     <main className="mx-auto max-w-5xl px-6 pt-10">
       <div className="mb-8">
-        <span className="eyebrow">Profile</span>
+        <span className="label">Profile</span>
         <h1 className="display mt-1 text-4xl font-extrabold sm:text-5xl">
           {profile.name}
         </h1>

@@ -8,3 +8,8 @@ node_modules/
 # Anchored: the resume/profile data lives in ./profiles, but an unanchored
 # rule also hid apps/web/app/profiles, which kept Tailwind from scanning it.
 /profiles/
+
+# `tsc -b` output. Both packages resolve through their `src` entry points, so
+# dist/ is a build artifact nothing imports.
+dist/
+*.tsbuildinfo

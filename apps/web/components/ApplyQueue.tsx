@@ -27,7 +27,7 @@ export function ApplyQueue({ tasks }: { tasks: Task[] }) {
 
   return (
     <section className="mt-12">
-      <h2 className="eyebrow">In progress · {tasks.length}</h2>
+      <h2 className="label">{tasks.length} in progress</h2>
       <ul className="mt-3 space-y-2">
         {tasks.map((task) => {
           const attention = task.status === "awaiting_human" || task.status === "failed";

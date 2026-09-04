@@ -40,7 +40,7 @@ export default async function AnswersPage({
 
   return (
     <main className="mx-auto max-w-2xl px-6 pt-12">
-      <span className="eyebrow">Answer bank</span>
+      <span className="label">Answer bank</span>
       <h1 className="display mt-1 text-4xl font-extrabold">{profile.name}</h1>
       <p className="mt-3 text-[14px] leading-relaxed text-ink-soft">
         These fill application forms automatically. A blank answer stops the

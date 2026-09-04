@@ -12,16 +12,19 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="min-h-screen">
         <header className="sticky top-0 z-10 border-b border-rule bg-paper/85 backdrop-blur">
           <div className="mx-auto flex max-w-5xl items-center justify-between px-6 py-3">
-            <Link href="/" className="display text-[15px] font-extrabold tracking-tight">
-              JOB AGENT
+            <Link href="/" className="display text-[15px] font-extrabold">
+              Job Agent
             </Link>
-            <span className="eyebrow">Dispatch board</span>
+            <span className="text-[13px] text-ink-soft">
+              Refills every 4 hours
+            </span>
           </div>
         </header>
         {children}
-        <footer className="mx-auto max-w-5xl px-6 pt-16 pb-10">
-          <p className="font-mono text-[11px] text-ink-soft">
-            Board refills every 4 hours. Nothing is submitted without you.
+        <footer className="mx-auto max-w-5xl border-t border-rule px-6 pb-10 pt-6">
+          <p className="text-[13px] text-ink-soft">
+            Nothing is submitted without you. Every application stops for review
+            before it is sent.
           </p>
         </footer>
       </body>

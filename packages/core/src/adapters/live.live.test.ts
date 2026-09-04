@@ -3,6 +3,7 @@ import { fetchGreenhouseBoard } from "./greenhouse.js";
 import { fetchLeverBoard } from "./lever.js";
 import { fetchAshbyBoard } from "./ashby.js";
 import { fetchRemoteOk } from "./remoteok.js";
+import { fetchYcombinator } from "./ycombinator.js";
 import { fetchArbeitnow } from "./arbeitnow.js";
 import { findLatestHiringThread } from "./hn.js";
 import {
@@ -70,4 +71,15 @@ describe("india-capable live endpoints", () => {
     expect(jobs.length).toBeGreaterThan(0);
     expect(Object.keys(jobs[0]!)).not.toContain("pubDate");
   });
+});
+
+describe("ycombinator", () => {
+  it("still renders its postings into the data-page attribute", async () => {
+    // The whole adapter rests on this: a redesign that moves the listing into a
+    // client-side fetch turns YC into a silent zero.
+    const postings = await fetchYcombinator();
+    expect(postings.length).toBeGreaterThan(0);
+    expect(postings[0]!.title.length).toBeGreaterThan(0);
+    expect(postings.some((p) => p.createdAt)).toBe(true);
+  }, 60_000);
 });

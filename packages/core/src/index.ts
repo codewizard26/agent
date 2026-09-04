@@ -21,5 +21,6 @@ export * from "./adapters/hn.js";
 export * from "./adapters/web-search.js";
 export * from "./adapters/bluesky.js";
 export * from "./adapters/india-boards.js";
+export * from "./adapters/ycombinator.js";
 export * from "./adapters/discover.js";
 export * from "./answers.js";

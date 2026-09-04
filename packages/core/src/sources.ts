@@ -9,6 +9,7 @@ import { fetchGreenhouseBoard, normalizeGreenhouse } from "./adapters/greenhouse
 import { fetchLeverBoard, normalizeLever } from "./adapters/lever.js";
 import { fetchAshbyBoard, normalizeAshby } from "./adapters/ashby.js";
 import { fetchRemoteOk, normalizeRemoteOk } from "./adapters/remoteok.js";
+import { fetchYcombinator, normalizeYc } from "./adapters/ycombinator.js";
 import { fetchArbeitnow, normalizeArbeitnow } from "./adapters/arbeitnow.js";
 import {
   fetchRemotive,
@@ -107,6 +108,14 @@ export function buildSources(opts: BuildSourcesOptions): SourceTask[] {
         (await fetchRemoteOk())
           .map(normalizeRemoteOk)
           .filter((j): j is NormalizedJob => j !== null),
+    },
+    {
+      // YC states an age ("19 days") rather than a timestamp, so its dates are
+      // derived and marked "reported" — good enough to survive a time window,
+      // which is why this sits with the dated sources and not with Ashby.
+      kind: "ycombinator" as const,
+      run: async (): Promise<NormalizedJob[]> =>
+        (await fetchYcombinator()).map((j) => normalizeYc(j)),
     },
     {
       kind: "arbeitnow" as const,

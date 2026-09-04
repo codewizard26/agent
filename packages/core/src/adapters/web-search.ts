@@ -35,7 +35,7 @@ function recencyPhrase(timeFrameDays: number | null): string {
  * person's title, and is why the results drifted off what the resume says.
  *
  * The `site:` queries are the whole point of this adapter. LinkedIn, Naukri,
- * Wellfound, Foundit, Cutshort and Hirist all refuse programmatic access
+ * Wellfound, Foundit, Cutshort, Hirist and SkillCareerHub all refuse programmatic access
  * (401/403/404/406) and forbid scraping, so their postings are reached the way
  * design §3 reaches X: as pages a search engine has already indexed. Nothing
  * here logs into anything or fetches those sites directly.
@@ -63,6 +63,10 @@ export function buildSearchQueries(
     // appending stack terms and a recency phrase over-constrains it to zero.
     `site:naukri.com ${primary} jobs India`,
     `site:wellfound.com OR site:hirist.tech OR site:cutshort.io ${roleOr} ${stack} India${recency}`,
+    // SkillCareerHub renders its board client-side and its robots.txt disallows
+    // /api/, so the listings are reachable only as pages a search engine has
+    // already indexed — the same route LinkedIn and Naukri take above.
+    `site:skillcareerhub.com ${primary} jobs India${recency}`,
     `${seniority} ${roleOr} jobs India Bangalore Hyderabad Pune ${stack}${recency}`,
     `remote ${seniority} ${roleOr} jobs ${stack} hiring from India${recency}`,
     `site:x.com OR site:twitter.com "we're hiring" OR "we are hiring" ${primary} ${stack}${recency}`,

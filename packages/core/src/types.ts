@@ -10,7 +10,8 @@ export type SourceKind =
   | "remotive"
   | "himalayas"
   | "jobicy"
-  | "instahyre";
+  | "instahyre"
+  | "ycombinator";
 
 export type AtsKind = "greenhouse" | "lever" | "ashby" | "workable";
 

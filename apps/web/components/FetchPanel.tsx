@@ -145,7 +145,7 @@ const TIER_LABELS: Record<string, string> = {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="grid gap-1.5">
-      <span className="eyebrow">{label}</span>
+      <span className="label text-[12px]">{label}</span>
       {children}
     </label>
   );
@@ -335,7 +335,7 @@ export function FetchPanel({
 
       {searchProfile && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[13px]">
-          <span className="eyebrow">Search by hand</span>
+          <span className="label">Search by hand</span>
           <a
             className="link"
             href={linkedInJobsUrl(searchProfile)}
@@ -374,7 +374,7 @@ export function FetchPanel({
 
       {results.length > 0 && (
         <div className="flex items-baseline justify-between gap-3">
-          <h2 className="eyebrow">
+          <h2 className="label">
             {running
               ? "Previous board — this fetch has not landed yet"
               : `Board · ${results.length} open · ${ranked} scored`}
@@ -386,7 +386,7 @@ export function FetchPanel({
         {results.map((job, i) => (
           <li
             key={job.key.slugKey}
-            className="sheet row-in flex gap-4 p-4"
+            className="sheet flex gap-4 p-4"
             style={{ animationDelay: `${Math.min(i, 12) * 22}ms` }}
           >
             <div className="flex w-4 shrink-0 flex-col items-center gap-2 pt-1">

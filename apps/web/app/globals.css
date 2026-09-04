@@ -2,19 +2,26 @@
 @import "tailwindcss";
 
 /*
- * Dispatch — the board is an operations sheet, not a feed. Type is one
- * characterful grotesque plus a mono that carries every number, date and
- * source label, so scanning a column of scores lines up on the digit.
+ * The board is a reading surface for a triage decision, not a feed. Thousands
+ * of postings are read each morning and a handful survive; the interface's job
+ * is to make that handful legible and everything else quiet.
+ *
+ * Colour is spent in one place — the score. Ink, paper and rule carry the rest,
+ * so a saturated pixel anywhere on the page means "this is how good the match
+ * is". Mono is reserved for numerals, where lining digits let a column of
+ * scores be scanned down the digit rather than read.
  */
 @theme {
   --font-sans: "Bricolage Grotesque", ui-sans-serif, system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --color-paper: #e8ebe3;
-  --color-card: #fbfcf9;
+  /* The ground sits a shade darker than the sheets so a document reads as a
+     document lying on a desk, not as a border drawn on the same plane. */
+  --color-paper: #dde0d8;
+  --color-card: #fcfdfa;
   --color-ink: #14181c;
   --color-ink-soft: #5a6470;
-  --color-rule: #cbd1c4;
+  --color-rule: #c7cdc0;
   --color-rule-soft: #dde1d7;
   --color-signal: #2340e8;
   --color-ember: #b3400c;
@@ -49,13 +56,19 @@
     line-height: 1.02;
   }
 
-  .eyebrow {
-    font-family: var(--font-mono);
-    font-size: 11px;
-    font-weight: 500;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
+  /* A section name, set quietly in the body face. Deliberately not a
+     tracked-out uppercase mono eyebrow: that treatment shouts at every heading
+     it sits above, and this page has enough real numbers to shout with. */
+  .label {
     color: var(--color-ink-soft);
+    font-size: 13px;
+    font-weight: 500;
+  }
+
+  /* Lining numerals, so a column of scores aligns on the digit. */
+  .num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
   }
 
   .sheet {
@@ -188,19 +201,15 @@
   background-color: var(--color-signal);
 }
 
-@keyframes row-in {
-  from {
-    opacity: 0;
-    transform: translateY(6px);
-  }
-  to {
-    opacity: 1;
-    transform: none;
-  }
+/* The spine: every job on a board plotted at its own score along one axis.
+   The shape of the run — clustered high, or a long tail into the thirties —
+   is the thing worth seeing, and no single row can show it. */
+.spine-axis {
+  background-color: var(--color-rule);
 }
 
-.row-in {
-  animation: row-in 320ms cubic-bezier(0.2, 0.7, 0.3, 1) both;
+.spine-tick {
+  transition: opacity 120ms ease;
 }
 
 /* While a fetch streams, the primary action reads as busy rather than dead. */
@@ -224,7 +233,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .row-in,
   .scanning {
     animation: none;
   }
