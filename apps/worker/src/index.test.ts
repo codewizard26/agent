@@ -105,3 +105,67 @@ describe("processTask", () => {
     expect(result.error).toContain("ERR_ABORTED");
   });
 });
+
+describe("processTask with auto-submit", () => {
+  const clean: AtsFiller = {
+    name: "greenhouse",
+    matches: () => true,
+    fill: async () => ({ filled: [{ label: "Email", answerKey: "email" }], blocked: [] }),
+  };
+
+  function submittingPage(bodyText: string) {
+    return {
+      goto: vi.fn(async () => ({ status: () => 200 })),
+      url: () => "https://job-boards.greenhouse.io/gitlab/jobs/1",
+      waitForTimeout: vi.fn(async () => {}),
+      waitForLoadState: vi.fn(async () => {}),
+      bringToFront: vi.fn(async () => {}),
+      innerText: vi.fn(async () => bodyText),
+      locator: () => ({
+        first: () => ({
+          count: async () => 1,
+          isVisible: async () => true,
+          click: vi.fn(async () => {}),
+        }),
+      }),
+    } as never;
+  }
+
+  function submitDeps(bodyText: string, autoSubmit: boolean): ProcessDeps {
+    return {
+      ...deps({ fillers: [clean] }),
+      openBrowser: vi.fn(async () => ({
+        context: {} as never,
+        page: submittingPage(bodyText),
+        close: vi.fn(async () => {}),
+      })),
+      autoSubmit,
+    };
+  }
+
+  it("submits and reports applied when the profile authorized it and nothing is blocked", async () => {
+    const result = await processTask(task, submitDeps("Thanks for applying!", true));
+    expect(result.status).toBe("applied");
+  });
+
+  it("still stops for the human when the profile has not authorized it", async () => {
+    const result = await processTask(task, submitDeps("Thanks for applying!", false));
+    expect(result.status).toBe("awaiting_human");
+  });
+
+  it("does not claim applied when the page never confirmed", async () => {
+    // An unverified click must leave the task with the human. Recording an
+    // application that may not exist is worse than asking twice.
+    const result = await processTask(task, submitDeps("Submit application", true));
+    expect(result.status).toBe("awaiting_human");
+    expect(result.error).toMatch(/no confirmation/);
+  });
+
+  it("never submits while a required question is unanswered", async () => {
+    const blocked = { ...submitDeps("Thanks for applying!", true), fillers: [
+      { name: "gh", matches: () => true, fill: async () => ({ filled: [], blocked: ["Why us?"] }) } as AtsFiller,
+    ] };
+    const result = await processTask(task, blocked);
+    expect(result.status).toBe("awaiting_human");
+  });
+});

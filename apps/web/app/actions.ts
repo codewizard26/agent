@@ -6,6 +6,7 @@ import {
   jobLedger,
   answerBank,
   applyTasks,
+  profiles,
   removeFromFeed,
 } from "@job-agent/db";
 
@@ -65,6 +66,23 @@ export async function markApplied(input: {
     applyUrl: input.applyUrl,
   });
   await d.delete(applyTasks).where(eq(applyTasks.id, input.taskId));
+}
+
+/**
+ * Turns direct submission on or off for one profile.
+ *
+ * Deliberately per profile and deliberately a deliberate act: the worker reads
+ * this flag per task, so two people sharing this database never inherit each
+ * other's consent to have applications sent in their name.
+ */
+export async function setAutoSubmit(input: {
+  profileId: string;
+  authorized: boolean;
+}): Promise<void> {
+  await db()
+    .update(profiles)
+    .set({ autoSubmitAuthorized: input.authorized })
+    .where(eq(profiles.id, input.profileId));
 }
 
 export async function listApplyTasks(profileId: string) {

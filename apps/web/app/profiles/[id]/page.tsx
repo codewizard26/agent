@@ -4,6 +4,7 @@ import { createDb, profiles, listFeed } from "@job-agent/db";
 import { resolveLlmProvider } from "@job-agent/core";
 import { FetchPanel } from "../../../components/FetchPanel";
 import { ApplyQueue } from "../../../components/ApplyQueue";
+import { AutoSubmitToggle } from "../../../components/AutoSubmitToggle";
 import { listApplyTasks } from "../../actions";
 
 export const dynamic = "force-dynamic";
@@ -129,6 +130,10 @@ export default async function ProfilePage({
         defaultTimeFrameDays={profile.feedTimeFrameDays ?? null}
         searchProfile={searchProfile}
         provider={resolveLlmProvider()}
+      />
+      <AutoSubmitToggle
+        profileId={id}
+        authorized={profile.autoSubmitAuthorized}
       />
       <ApplyQueue tasks={tasks as never} />
     </main>
