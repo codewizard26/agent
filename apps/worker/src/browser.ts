@@ -1,6 +1,7 @@
 import path from "node:path";
 import os from "node:os";
 import { chromium, type BrowserContext, type Page } from "playwright-core";
+import { KEEP_NAMES_SHIM } from "./shim.js";
 
 export interface BrowserSession {
   context: BrowserContext;
@@ -24,6 +25,9 @@ export async function openWorkerBrowser(
     headless: false,
     viewport: { width: 1280, height: 1000 },
   });
+  // Runs before every document in this context, so it is in place by the time
+  // any harvest evaluates. See shim.ts — without it page.evaluate throws.
+  await context.addInitScript(KEEP_NAMES_SHIM);
   const page = context.pages()[0] ?? (await context.newPage());
   return { context, page, close: async () => await context.close() };
 }
