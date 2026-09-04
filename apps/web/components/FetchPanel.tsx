@@ -483,7 +483,7 @@ export function FetchPanel({
                     router.refresh();
                   }}
                 >
-                  Queue application
+                  Apply now
                 </button>
                 <button
                   className="btn btn-quiet"

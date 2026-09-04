@@ -15,33 +15,30 @@ interface Task {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  queued: "queued",
-  running: "filling the form",
+  queued: "starting",
+  opening: "opening the posting",
+  filling: "filling the form",
   awaiting_human: "needs you",
-  applied: "applied",
   failed: "failed",
 };
 
 export function ApplyQueue({ tasks }: { tasks: Task[] }) {
   if (tasks.length === 0) return null;
 
-  // Queueing writes a row and stops. The apply worker is a separate process
-  // driving a real browser, and while it is not running these sit here for
-  // ever — which reads exactly like a broken button unless the page says so.
+  // Applying opens a real browser and takes half a minute. These rows are that
+  // work in progress — an application that has finished leaves the list, so
+  // anything still sitting at "starting" means no browser is driving it.
   const stalled = tasks.every((task) => task.status === "queued");
 
   return (
     <section className="mt-12">
-      <h2 className="label">{tasks.length} queued to apply to</h2>
+      <h2 className="label">{tasks.length} in progress</h2>
       {stalled && (
         <p className="mt-2 max-w-[62ch] text-[13px] text-ink-soft">
-          Nothing is being filled in right now. The apply worker runs as its own
-          process and opens a real browser to fill each form; start it with{" "}
-          <code className="font-mono text-[12px]">
-            pnpm --filter @job-agent/worker start
-          </code>
-          . Nothing is ever submitted for you — the worker fills the form, then
-          stops and hands you the browser.
+          Nothing is being filled in. Applying drives a real browser from a
+          second process, and it is not running — start both together with{" "}
+          <code className="font-mono text-[12px]">pnpm dev</code> from the repo
+          root.
         </p>
       )}
       <ul className="mt-3 space-y-2">

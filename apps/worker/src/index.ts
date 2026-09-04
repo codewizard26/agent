@@ -146,7 +146,9 @@ export async function runWorkerLoop(): Promise<void> {
       .limit(1);
 
     if (!task) {
-      await new Promise((r) => setTimeout(r, 3000));
+      // Short enough that pressing Apply in the browser feels like the click
+      // itself did the work, rather than like something was filed away.
+      await new Promise((r) => setTimeout(r, 800));
       continue;
     }
 
