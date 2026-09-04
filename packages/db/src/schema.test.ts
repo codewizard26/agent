@@ -45,3 +45,24 @@ describe("schema", () => {
     expect(rows[0]!.state).toBe("applied");
   });
 });
+
+describe("createDb without DATABASE_URL", () => {
+  it("names the missing variable when running on Vercel", async () => {
+    // The local PGlite fallback is right for tests and a fresh clone, and wrong
+    // in a deployed function: PGlite is not installed there, so the fallback
+    // fails with "Cannot find module '@electric-sql/pglite'" — an error that
+    // points at a dependency rather than at the unset variable that caused it.
+    const { createDb } = await import("./client.js");
+    const prevUrl = process.env.DATABASE_URL;
+    const prevVercel = process.env.VERCEL;
+    delete process.env.DATABASE_URL;
+    process.env.VERCEL = "1";
+    try {
+      expect(() => createDb()).toThrow(/DATABASE_URL/);
+    } finally {
+      if (prevUrl) process.env.DATABASE_URL = prevUrl;
+      if (prevVercel) process.env.VERCEL = prevVercel;
+      else delete process.env.VERCEL;
+    }
+  });
+});

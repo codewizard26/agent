@@ -101,6 +101,20 @@ export function createLocalDb(dir?: string) {
 
 export function createDb(connectionString?: string) {
   const url = connectionString ?? process.env.DATABASE_URL;
-  if (!url) return createLocalDb();
+  if (!url) {
+    // The local fallback is for tests and a fresh clone. In a deployed function
+    // PGlite is not installed, so falling through raises "Cannot find module
+    // '@electric-sql/pglite'" — an error naming a dependency rather than the
+    // unset variable that actually caused it. Measured 2026-09-04: that was the
+    // whole content of a 500 on the first Vercel deploy.
+    if (process.env.VERCEL) {
+      throw new Error(
+        "DATABASE_URL is not set on this deployment. Add it with " +
+          "`vercel env add DATABASE_URL production` — without it the app falls " +
+          "back to a local database that does not exist in a serverless function.",
+      );
+    }
+    return createLocalDb();
+  }
   return drizzleNeon(neon(url), { schema }) as never;
 }
