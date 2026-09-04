@@ -84,9 +84,14 @@ export async function submitApplication(page: Page): Promise<SubmitResult> {
 
     const text = await page.innerText("body").catch(() => "");
     if (confirmsSubmission(text)) return { submitted: true, reason: null };
+    // The click may well have worked and CONFIRMATIONS simply may not know this
+    // board's wording yet. Carry the page's own words back so the gap is
+    // fixable from the task row instead of by guessing at another regex.
     return {
       submitted: false,
-      reason: `clicked ${selector} but the page showed no confirmation`,
+      reason:
+        `clicked ${selector} but no confirmation matched. Page said: ` +
+        text.replace(/\s+/g, " ").trim().slice(0, 300),
     };
   }
 
