@@ -11,6 +11,7 @@ import { createGenericFiller } from "./fillers/generic.js";
 import type { AtsFiller, FillOutcome } from "./fillers/types.js";
 import { shouldAutoSubmit, submitApplication } from "./submit.js";
 import { resolveResumePath } from "./resume.js";
+import { assertSharedDatabase } from "./database.js";
 
 export interface ApplyTaskRow {
   id: string;
@@ -120,6 +121,7 @@ export async function processTask(
 }
 
 export async function runWorkerLoop(): Promise<void> {
+  assertSharedDatabase(process.env);
   const db = createDb();
   const client = createLlmClient();
   const fillers = [
