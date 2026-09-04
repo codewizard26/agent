@@ -6,6 +6,7 @@ import { canApplyHere } from "../../../lib/apply-availability";
 import { FetchPanel } from "../../../components/FetchPanel";
 import { ApplyQueue } from "../../../components/ApplyQueue";
 import { AutoSubmitToggle } from "../../../components/AutoSubmitToggle";
+import { StartApplying } from "../../../components/StartApplying";
 import { listApplyTasks } from "../../actions";
 
 export const dynamic = "force-dynamic";
@@ -133,6 +134,12 @@ export default async function ProfilePage({
         provider={resolveLlmProvider()}
         canApply={canApplyHere()}
       />
+      {canApplyHere() && (
+        <StartApplying
+          profileId={id}
+          heldCount={tasks.filter((t) => t.status === "held").length}
+        />
+      )}
       {canApplyHere() && <AutoSubmitToggle
         profileId={id}
         authorized={profile.autoSubmitAuthorized}

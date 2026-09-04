@@ -1,6 +1,8 @@
 "use client";
 
-import { markApplied } from "../app/actions";
+import { useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { markApplied, removeApplyTask } from "../app/actions";
 
 interface Task {
   id: string;
@@ -15,12 +17,30 @@ interface Task {
 }
 
 const STATUS_LABELS: Record<string, string> = {
+  held: "ready",
   queued: "starting",
   opening: "opening the posting",
   filling: "filling the form",
   awaiting_human: "needs you",
   failed: "failed",
 };
+
+function RemoveButton({ taskId }: { taskId: string }) {
+  const [pending, start] = useTransition();
+  const router = useRouter();
+  return (
+    <button
+      className="btn btn-quiet"
+      disabled={pending}
+      onClick={() => start(async () => {
+        await removeApplyTask(taskId);
+        router.refresh();
+      })}
+    >
+      {pending ? "Removing…" : "Remove"}
+    </button>
+  );
+}
 
 export function ApplyQueue({
   tasks,
@@ -88,6 +108,7 @@ export function ApplyQueue({
                 >
                   Open the application
                 </a>
+                <RemoveButton taskId={task.id} />
                 {task.status === "awaiting_human" && (
                   <button
                     className="btn btn-go ml-auto"

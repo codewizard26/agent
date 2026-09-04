@@ -77,10 +77,13 @@ export const applyTasks = pgTable("apply_tasks", {
   title: text("title").notNull(),
   applyUrl: text("apply_url").notNull(),
   status: text("status", {
-    enum: ["queued", "opening", "filling", "awaiting_human", "failed"],
+    // "held" is where Apply parks a job: queued by a person, not yet being
+    // acted on. Start applying flips a profile's held tasks to "queued", which
+    // is the only status the worker selects.
+    enum: ["held", "queued", "opening", "filling", "awaiting_human", "failed"],
   })
     .notNull()
-    .default("queued"),
+    .default("held"),
   blockedFields: jsonb("blocked_fields"),
   fillReport: jsonb("fill_report"),
   error: text("error"),

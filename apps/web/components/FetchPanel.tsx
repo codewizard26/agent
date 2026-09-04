@@ -491,7 +491,7 @@ export function FetchPanel({
                     router.refresh();
                   }}
                 >
-                  Apply now
+                  Add to apply queue
                 </button>
                 ) : (
                   <a
@@ -501,6 +501,18 @@ export function FetchPanel({
                     rel="noreferrer"
                   >
                     Open the posting
+                  </a>
+                )}
+                {canApply && (
+                  // Some postings are better done by hand — a search page the
+                  // filler cannot read, or a form worth reading first.
+                  <a
+                    className="btn btn-quiet"
+                    href={job.applyUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Apply by hand
                   </a>
                 )}
                 <button

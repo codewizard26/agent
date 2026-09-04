@@ -83,3 +83,35 @@ describe("apply queue", () => {
     expect(rows[0]!.slugKey).toBe("discord|senior engineer");
   });
 });
+
+describe("held tasks", () => {
+  it("are invisible to the worker until a run is started", async () => {
+    // Queueing now parks a job at "held". The worker only ever selects
+    // "queued", so nothing is applied to until Start applying flips the batch
+    // over — which is the whole point: build the list first, run it on purpose.
+    handle = await createTestDb();
+    const db = handle.db;
+    {
+      const [profile] = await db.insert(profiles).values({
+        name: "Held", ownerEmail: "held@example.test", resumeText: "",
+      }).returning();
+
+      await db.insert(applyTasks).values({
+        profileId: profile!.id, atsKey: null, slugKey: "acme|engineer",
+        company: "acme", title: "Engineer", applyUrl: "https://example.test/1",
+        status: "held",
+      });
+
+      const pickedUp = await db.select().from(applyTasks)
+        .where(eq(applyTasks.status, "queued"));
+      expect(pickedUp).toHaveLength(0);
+
+      await db.update(applyTasks).set({ status: "queued" })
+        .where(eq(applyTasks.profileId, profile!.id));
+
+      const afterStart = await db.select().from(applyTasks)
+        .where(eq(applyTasks.status, "queued"));
+      expect(afterStart).toHaveLength(1);
+    }
+  });
+});

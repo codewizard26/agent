@@ -1,6 +1,6 @@
 "use server";
 
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import {
   createDb,
   jobLedger,
@@ -37,7 +37,8 @@ export async function queueApply(input: {
   applyUrl: string;
 }): Promise<void> {
   const d = db();
-  await d.insert(applyTasks).values(input);
+  // Parked, not started. Start applying is what releases the batch.
+  await d.insert(applyTasks).values({ ...input, status: "held" });
   await removeFromFeed(d, input.profileId, input);
 }
 
@@ -83,6 +84,27 @@ export async function setAutoSubmit(input: {
     .update(profiles)
     .set({ autoSubmitAuthorized: input.authorized })
     .where(eq(profiles.id, input.profileId));
+}
+
+/**
+ * Releases everything this profile has queued, in one deliberate act.
+ *
+ * Apply parks a job at "held"; the worker only ever selects "queued". Nothing
+ * is applied to until this runs, so the list is built first and then run on
+ * purpose rather than each click firing a browser the moment it lands.
+ */
+export async function startApplying(profileId: string): Promise<number> {
+  const released = await db()
+    .update(applyTasks)
+    .set({ status: "queued", updatedAt: new Date() })
+    .where(and(eq(applyTasks.profileId, profileId), eq(applyTasks.status, "held")))
+    .returning();
+  return released.length;
+}
+
+/** Takes one job back out of the queue. Writes no ledger row, so it returns on the next fetch. */
+export async function removeApplyTask(taskId: string): Promise<void> {
+  await db().delete(applyTasks).where(eq(applyTasks.id, taskId));
 }
 
 export async function listApplyTasks(profileId: string) {
