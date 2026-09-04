@@ -2,6 +2,7 @@ import Link from "next/link";
 import { eq } from "drizzle-orm";
 import { createDb, profiles, listFeed } from "@job-agent/db";
 import { resolveLlmProvider } from "@job-agent/core";
+import { canApplyHere } from "../../../lib/apply-availability";
 import { FetchPanel } from "../../../components/FetchPanel";
 import { ApplyQueue } from "../../../components/ApplyQueue";
 import { AutoSubmitToggle } from "../../../components/AutoSubmitToggle";
@@ -130,12 +131,13 @@ export default async function ProfilePage({
         defaultTimeFrameDays={profile.feedTimeFrameDays ?? null}
         searchProfile={searchProfile}
         provider={resolveLlmProvider()}
+        canApply={canApplyHere()}
       />
-      <AutoSubmitToggle
+      {canApplyHere() && <AutoSubmitToggle
         profileId={id}
         authorized={profile.autoSubmitAuthorized}
-      />
-      <ApplyQueue tasks={tasks as never} />
+      />}
+      <ApplyQueue tasks={tasks as never} canApply={canApplyHere()} />
     </main>
   );
 }

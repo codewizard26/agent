@@ -22,7 +22,14 @@ const STATUS_LABELS: Record<string, string> = {
   failed: "failed",
 };
 
-export function ApplyQueue({ tasks }: { tasks: Task[] }) {
+export function ApplyQueue({
+  tasks,
+  canApply = true,
+}: {
+  tasks: Task[];
+  /** False on a deployed function, where nothing can pick these up. */
+  canApply?: boolean;
+}) {
   if (tasks.length === 0) return null;
 
   // Applying opens a real browser and takes half a minute. These rows are that
@@ -35,10 +42,22 @@ export function ApplyQueue({ tasks }: { tasks: Task[] }) {
       <h2 className="label">{tasks.length} in progress</h2>
       {stalled && (
         <p className="mt-2 max-w-[62ch] text-[13px] text-ink-soft">
-          Nothing is being filled in. Applying drives a real browser from a
-          second process, and it is not running — start both together with{" "}
-          <code className="font-mono text-[12px]">pnpm dev</code> from the repo
-          root.
+          {canApply ? (
+            <>
+              Nothing is being filled in. Applying drives a real browser from a
+              second process, and it is not running — start both together with{" "}
+              <code className="font-mono text-[12px]">pnpm dev</code> from the
+              repo root.
+            </>
+          ) : (
+            <>
+              These were queued from this site, where nothing can pick them up:
+              applying needs a real browser, which a deployed function has
+              nowhere to run. Open the repo locally and run{" "}
+              <code className="font-mono text-[12px]">pnpm dev</code> and they
+              will be picked up there.
+            </>
+          )}
         </p>
       )}
       <ul className="mt-3 space-y-2">

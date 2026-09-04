@@ -158,6 +158,7 @@ export function FetchPanel({
   defaultTimeFrameDays = 7,
   searchProfile,
   provider = "openai",
+  canApply = true,
 }: {
   profileId: string;
   /** The stored board, so the page has content before any fetch runs. */
@@ -175,6 +176,12 @@ export function FetchPanel({
    * only works while the dev server runs on a machine with the binary.
    */
   provider?: "openai" | "claude";
+  /**
+   * False where no browser can be launched — a deployed function. Applying is
+   * offered only where it can finish; elsewhere the posting opens directly so
+   * the job is still one click from being applied to by hand.
+   */
+  canApply?: boolean;
 }) {
   const [timeFrameDays, setTimeFrameDays] = useState<number | null>(
     defaultTimeFrameDays,
@@ -468,6 +475,7 @@ export function FetchPanel({
               ) : null}
 
               <div className="mt-3 flex flex-wrap items-center gap-2">
+                {canApply ? (
                 <button
                   className="btn btn-primary"
                   onClick={async () => {
@@ -485,6 +493,16 @@ export function FetchPanel({
                 >
                   Apply now
                 </button>
+                ) : (
+                  <a
+                    className="btn btn-primary"
+                    href={job.applyUrl}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Open the posting
+                  </a>
+                )}
                 <button
                   className="btn btn-quiet"
                   onClick={async () => {
