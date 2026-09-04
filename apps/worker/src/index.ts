@@ -12,6 +12,8 @@ import type { AtsFiller, FillOutcome } from "./fillers/types.js";
 import { shouldAutoSubmit, submitApplication } from "./submit.js";
 import { resolveResumePath } from "./resume.js";
 import { assertSharedDatabase } from "./database.js";
+import { classifyPage, withDeadline } from "./page-state.js";
+import { harvestFields } from "./harvest.js";
 
 export interface ApplyTaskRow {
   id: string;
@@ -58,13 +60,64 @@ export async function processTask(
   task: ApplyTaskRow,
   deps: ProcessDeps,
 ): Promise<ProcessResult> {
-  const session = await deps.openBrowser();
+  // Inside the try: a launch failure — most often the persistent Chrome
+  // profile still locked by an earlier run — used to propagate out of here and
+  // out of runWorkerLoop, killing the worker process and, under `pnpm dev`,
+  // the web server alongside it. One bad task must only fail that task.
+  let session: BrowserSession;
   try {
-    await session.page.goto(task.applyUrl, {
+    session = await deps.openBrowser();
+  } catch (error) {
+    return {
+      status: "failed",
+      fillReport: { filled: [], blocked: [] },
+      blocked: [],
+      fillerUsed: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  try {
+    const response = await session.page.goto(task.applyUrl, {
       waitUntil: "domcontentloaded",
       timeout: 45_000,
     });
     await session.page.waitForTimeout(3000);
+
+    // What did we actually land on? A board row can outlive the posting behind
+    // it, and a websearch result often points at a listing rather than a form.
+    // Deciding this before filling is what keeps a dead link from becoming a
+    // task that never finishes.
+    const landed = classifyPage({
+      status: response?.status() ?? null,
+      text: await session.page.innerText("body").catch(() => ""),
+      fieldCount: (await harvestFields(session.page).catch(() => [])).length,
+    });
+
+    if (landed.kind === "gone") {
+      // Nothing to hand a person either — the posting does not exist.
+      await session.close();
+      return {
+        status: "failed",
+        fillReport: { filled: [], blocked: [] },
+        blocked: [],
+        fillerUsed: null,
+        error: `posting is gone (${landed.reason})`,
+      };
+    }
+
+    if (landed.kind === "no-form") {
+      // Live, but not an application: a listing or a search page. A person can
+      // still apply on it, so leave the tab open for them.
+      await session.page.bringToFront();
+      return {
+        status: "awaiting_human",
+        fillReport: { filled: [], blocked: [] },
+        blocked: [],
+        fillerUsed: null,
+        error: "no application form on this page — apply here by hand",
+      };
+    }
 
     // Resolve AFTER redirects — many boards bounce to a bespoke careers site.
     const landingUrl = session.page.url();
@@ -120,6 +173,9 @@ export async function processTask(
   // The browser is deliberately left open — the user finishes in it.
 }
 
+/** Ceiling on one whole application, browser launch included. */
+const TASK_DEADLINE_MS = 240_000;
+
 export async function runWorkerLoop(): Promise<void> {
   assertSharedDatabase(process.env);
   const db = createDb();
@@ -174,7 +230,10 @@ export async function runWorkerLoop(): Promise<void> {
       if (value) answers.set(def.key, value);
     }
 
-    const result = await processTask(task, {
+    // One task must never be able to stop the queue — not by hanging, and not
+    // by throwing something processTask did not anticipate.
+    const result = await withDeadline(
+      () => processTask(task, {
       openBrowser: openWorkerBrowser,
       fillers,
       answers,
@@ -183,7 +242,16 @@ export async function runWorkerLoop(): Promise<void> {
         resumeBlobUrl: profile?.resumeBlobUrl ?? null,
       }),
       autoSubmit: profile?.autoSubmitAuthorized ?? false,
-    });
+      }),
+      TASK_DEADLINE_MS,
+      `${task.company} — ${task.title}`,
+    ).catch((error: unknown) => ({
+      status: "failed" as const,
+      fillReport: { filled: [], blocked: [] },
+      blocked: [] as string[],
+      fillerUsed: null,
+      error: error instanceof Error ? error.message : String(error),
+    }));
 
     if (result.status === "applied") {
       // Same rows `markApplied` writes when a person confirms by hand: the
@@ -214,7 +282,8 @@ export async function runWorkerLoop(): Promise<void> {
 
     console.log(
       `${task.company} — ${task.title}: ${result.status}` +
-        (result.blocked.length ? ` — needs you: ${result.blocked.join("; ")}` : ""),
+        (result.blocked.length ? ` — needs you: ${result.blocked.join("; ")}` : "") +
+        (result.error ? ` — ${result.error.slice(0, 160)}` : ""),
     );
   }
 }

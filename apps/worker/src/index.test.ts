@@ -12,12 +12,21 @@ const task = {
   applyUrl: "https://job-boards.greenhouse.io/gitlab/jobs/1",
 };
 
-function fakePage(url: string, goto?: () => Promise<unknown>) {
+/**
+ * `fieldCount` drives classifyPage: processTask now decides what it landed on
+ * before filling, and a page with no fields is not treated as a form.
+ */
+function fakePage(url: string, goto?: () => Promise<unknown>, fieldCount = 6) {
+  const fields = Array.from({ length: fieldCount }, (_, i) => ({
+    selector: `#f${i}`, label: `Field ${i}`, type: "text", required: false, options: [],
+  }));
   return {
     goto: vi.fn(goto ?? (async () => ({ status: () => 200 }))),
     url: () => url,
     waitForTimeout: vi.fn(async () => {}),
     bringToFront: vi.fn(async () => {}),
+    innerText: vi.fn(async () => "Apply for this job"),
+    evaluate: vi.fn(async () => fields),
   } as never;
 }
 
@@ -120,6 +129,11 @@ describe("processTask with auto-submit", () => {
       waitForTimeout: vi.fn(async () => {}),
       waitForLoadState: vi.fn(async () => {}),
       bringToFront: vi.fn(async () => {}),
+      evaluate: vi.fn(async () =>
+        Array.from({ length: 6 }, (_, i) => ({
+          selector: `#f${i}`, label: `Field ${i}`, type: "text", required: false, options: [],
+        })),
+      ),
       innerText: vi.fn(async () => bodyText),
       locator: () => ({
         first: () => ({
@@ -167,5 +181,24 @@ describe("processTask with auto-submit", () => {
     ] };
     const result = await processTask(task, blocked);
     expect(result.status).toBe("awaiting_human");
+  });
+});
+
+describe("processTask when the browser will not open", () => {
+  it("reports the task failed instead of throwing", async () => {
+    // openBrowser sat outside the try, so a launch failure propagated out of
+    // processTask, out of runWorkerLoop, and killed the worker process — which
+    // under `pnpm dev` took the web server down with it. One locked Chrome
+    // profile ended the whole session.
+    const result = await processTask(task, {
+      ...deps(),
+      openBrowser: async () => {
+        throw new Error(
+          "browserType.launchPersistentContext: Opening in existing browser session.",
+        );
+      },
+    });
+    expect(result.status).toBe("failed");
+    expect(result.error).toMatch(/launchPersistentContext/);
   });
 });
