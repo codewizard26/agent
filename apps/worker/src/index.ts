@@ -1,6 +1,7 @@
 import { eq, inArray } from "drizzle-orm";
 import { createDb, applyTasks, answerBank, profiles, jobLedger } from "@job-agent/db";
 import { resolveAnswer, ANSWER_KEYS, createLlmClient } from "@job-agent/core";
+import { createAnswerComposer } from "./compose.js";
 import { openWorkerBrowser, type BrowserSession } from "./browser.js";
 import { selectFiller } from "./fillers/select.js";
 import { greenhouseFiller } from "./fillers/greenhouse.js";
@@ -13,6 +14,7 @@ import { shouldAutoSubmit, submitApplication } from "./submit.js";
 import { resolveResumePath } from "./resume.js";
 import { assertSharedDatabase } from "./database.js";
 import { classifyPage, withDeadline } from "./page-state.js";
+import type { AnswerComposer } from "./compose.js";
 import { harvestFields } from "./harvest.js";
 
 export interface ApplyTaskRow {
@@ -30,6 +32,8 @@ export interface ProcessDeps {
   fillers: AtsFiller[];
   answers: Map<string, string>;
   resumePath: string;
+  /** Writes answers for questions the answer bank does not cover. */
+  compose?: AnswerComposer;
   /**
    * `profiles.auto_submit_authorized` for the profile this task belongs to.
    * Read per task, never once for the process — two people share a database
@@ -80,9 +84,9 @@ export async function processTask(
   try {
     const response = await session.page.goto(task.applyUrl, {
       waitUntil: "domcontentloaded",
-      timeout: 45_000,
+      timeout: 15_000,
     });
-    await session.page.waitForTimeout(3000);
+    await session.page.waitForTimeout(1500);
 
     // What did we actually land on? A board row can outlive the posting behind
     // it, and a websearch result often points at a listing rather than a form.
@@ -128,6 +132,7 @@ export async function processTask(
       page: session.page,
       answers: deps.answers,
       resumePath: deps.resumePath,
+      compose: deps.compose,
     });
 
     if (shouldAutoSubmit({ authorized: deps.autoSubmit ?? false, blocked: outcome.blocked })) {
@@ -174,7 +179,7 @@ export async function processTask(
 }
 
 /** Ceiling on one whole application, browser launch included. */
-const TASK_DEADLINE_MS = 240_000;
+const TASK_DEADLINE_MS = 90_000;
 
 export async function runWorkerLoop(): Promise<void> {
   assertSharedDatabase(process.env);
@@ -242,6 +247,12 @@ export async function runWorkerLoop(): Promise<void> {
         resumeBlobUrl: profile?.resumeBlobUrl ?? null,
       }),
       autoSubmit: profile?.autoSubmitAuthorized ?? false,
+      compose: createAnswerComposer(client, {
+        resumeText: profile?.resumeText ?? "",
+        known: answers,
+        company: task.company,
+        title: task.title,
+      }),
       }),
       TASK_DEADLINE_MS,
       `${task.company} — ${task.title}`,

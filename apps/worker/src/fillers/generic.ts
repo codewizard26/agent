@@ -96,15 +96,22 @@ export function createGenericFiller(client: LlmClient): AtsFiller {
         }
 
         const mapping = mappings.find((m) => m.selector === field.selector);
-        const value = mapping?.answerKey ? ctx.answers.get(mapping.answerKey) : undefined;
+        let value = mapping?.answerKey ? ctx.answers.get(mapping.answerKey) : undefined;
+        if (!value && ctx.compose) {
+          value = (await ctx.compose(field)) ?? undefined;
+        }
 
         if (!value) {
           blocked.push(field.label);
           continue;
         }
 
-        await ctx.page.fill(field.selector, value).catch(() => {});
-        filled.push({ label: field.label, answerKey: mapping!.answerKey! });
+        if (field.type === "select") {
+          await ctx.page.selectOption(field.selector, { label: value }).catch(() => {});
+        } else {
+          await ctx.page.fill(field.selector, value).catch(() => {});
+        }
+        filled.push({ label: field.label, answerKey: mapping?.answerKey ?? "composed" });
       }
 
       return { filled, blocked };

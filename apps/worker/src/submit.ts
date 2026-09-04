@@ -76,11 +76,11 @@ export async function submitApplication(page: Page): Promise<SubmitResult> {
     if ((await control.count()) === 0) continue;
     if (!(await control.isVisible().catch(() => false))) continue;
 
-    await control.click({ timeout: 15_000 });
+    await control.click({ timeout: 8_000 });
     // Boards either navigate to a confirmation page or swap the form out in
     // place, so wait for the network to settle rather than for a URL change.
-    await page.waitForLoadState("networkidle", { timeout: 30_000 }).catch(() => {});
-    await page.waitForTimeout(2000);
+    await page.waitForLoadState("networkidle", { timeout: 10_000 }).catch(() => {});
+    await page.waitForTimeout(1500);
 
     const text = await page.innerText("body").catch(() => "");
     if (confirmsSubmission(text)) return { submitted: true, reason: null };

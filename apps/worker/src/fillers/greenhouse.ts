@@ -66,9 +66,13 @@ export function createLabelFiller(
           continue;
         }
         const key = map[field.label.trim().toLowerCase()];
-        const value = key ? ctx.answers.get(key) : undefined;
-        if (!key || !value) {
-          // Company-specific questions and unanswered keys both land here.
+        let value = key ? ctx.answers.get(key) : undefined;
+        if (!value && ctx.compose) {
+          // Company-specific questions have no stored answer by definition.
+          // Composing one is what lets a run finish unattended.
+          value = (await ctx.compose(field)) ?? undefined;
+        }
+        if (!value) {
           blocked.push(field.label);
           continue;
         }

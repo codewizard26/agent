@@ -15,6 +15,11 @@ export interface FillContext {
   /** Resolved answers by canonical key. Absent means unanswered. */
   answers: Map<string, string>;
   resumePath: string;
+  /**
+   * Writes an answer for a field the answer bank does not cover. Absent, or
+   * returning null, means the field is left for a person.
+   */
+  compose?: (field: HarvestedField) => Promise<string | null>;
 }
 
 export interface FillOutcome {
