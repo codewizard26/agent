@@ -1,5 +1,6 @@
 "use client";
 
+import { DEFAULT_FEED_FILTERS, filterFeed, type FeedFilters } from "../lib/feed-filters";
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { dismissJob, queueApply } from "../app/actions";
@@ -66,6 +67,7 @@ interface RankedResult {
   company: string;
   title: string;
   locationRaw: string;
+  remote?: boolean;
   applyUrl: string;
   sourceKind: string;
   postedAt: string | null;
@@ -152,6 +154,27 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
+type MultiFilterKey = "location" | "role" | "source" | "tier" | "employment";
+
+function MultiSelect({ label, options, selected, onChange }: {
+  label: string;
+  options: string[][];
+  selected: string[];
+  onChange: (values: string[]) => void;
+}) {
+  return <details className="relative rounded border border-rule-soft p-2">
+    <summary className="cursor-pointer text-sm">{label}: {selected.length ? `${selected.length} selected` : "All"}</summary>
+    <fieldset className="mt-2 grid max-h-56 gap-2 overflow-auto">
+      <legend className="sr-only">{label}</legend>
+      <button type="button" className="link text-left text-xs" onClick={() => onChange([])}>Clear selection (show all)</button>
+      {options.map(([value, text]) => <label key={value} className="flex items-center gap-2 text-sm">
+        <input type="checkbox" checked={selected.includes(value)} onChange={() => onChange(selected.includes(value) ? selected.filter((item) => item !== value) : [...selected, value])} />
+        {text}
+      </label>)}
+    </fieldset>
+  </details>;
+}
+
 export function FetchPanel({
   profileId,
   initialResults = [],
@@ -191,6 +214,7 @@ export function FetchPanel({
   const [maxBoards, setMaxBoards] = useState<number | null>(null);
   const [log, setLog] = useState<string[]>([]);
   const [results, setResults] = useState<RankedResult[]>(initialResults);
+  const [filters, setFilters] = useState<FeedFilters>({ ...DEFAULT_FEED_FILTERS });
   const [running, setRunning] = useState(false);
   // The queue below this panel is server-rendered from `listApplyTasks`, so a
   // server action alone leaves it showing the list from page load. Without this
@@ -239,7 +263,11 @@ export function FetchPanel({
                 (event.failed.length ? ` (${event.failed.join(", ")} failed)` : ""),
             ]);
           } else if (event.type === "filtered") {
-            setLog((l) => [...l, `${event.kept} match, ${event.rejected} filtered out`]);
+            setLog((l) => [
+              ...l, `${event.kept} match, ${event.rejected} filtered out`,
+              ...Object.entries(event.sourceCounts ?? {}).map(([source, count]) => `${source}: ${count} matches`),
+              ...Object.entries(event.reasons ?? {}).map(([reason, count]) => `${count} excluded: ${reason}`),
+            ]);
           } else if (event.type === "ranking") {
             setLog((l) => [...l, `ranking ${event.jobs}…`]);
           } else if (event.type === "done") {
@@ -259,7 +287,11 @@ export function FetchPanel({
     setResults((r) => r.filter((j) => j.key.slugKey !== slugKey));
   }
 
-  const ranked = results.filter((job) => job.rank !== null).length;
+  const visibleResults = filterFeed(results, filters);
+  const sourceOptions = [...new Set(results.map((job) => job.sourceKind))].sort();
+  const setFilter = (field: "query" | "sort", value: string) => setFilters((current) => ({ ...current, [field]: value }));
+  const setMultiFilter = (field: MultiFilterKey, value: string[]) => setFilters((current) => ({ ...current, [field]: value }));
+  const ranked = visibleResults.filter((job) => job.rank !== null).length;
 
   return (
     <div className="space-y-5">
@@ -365,7 +397,21 @@ export function FetchPanel({
             Naukri (India, fresher)
           </a>
           <span className="text-[12px] text-ink-soft">
-            Prefilled searches you browse yourself — nothing here reaches the board.
+            Browse more boards:
+          </span>
+          {[
+            ["Carrerlift", "https://www.carrerlift.in/jobs"],
+            ["Hirist", "https://www.hirist.tech/c/backend-development-jobs?ref=topnavigation&pref=cl"],
+            ["Built In", "https://builtin.com/jobs"],
+            ["Indeed India", "https://in.indeed.com/"],
+            ["beBee", "https://bebee.com/in/jobs"],
+          ].map(([label, href]) => (
+            <a key={href} className="link" href={href} target="_blank" rel="noreferrer">
+              {label}
+            </a>
+          ))}
+          <span className="text-[12px] text-ink-soft">
+            Carrerlift is fetched directly. Other boards use indexed postings. Sign-in-only listings require manual browsing.
           </span>
         </div>
       )}
@@ -384,18 +430,41 @@ export function FetchPanel({
         </ol>
       )}
 
+      <section className="sheet space-y-3 p-4" aria-label="Filter jobs">
+        <p className="text-sm text-ink-soft">Gurugram, Noida and Delhi appear first. Other locations and all role types remain visible unless you filter them. Select multiple options within each filter; different filters combine.</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+          <Field label="Search title, company or location">
+            <input className="select" value={filters.query} onChange={(e) => setFilter("query", e.target.value)} placeholder="e.g. React, Noida" />
+          </Field>
+          <MultiSelect label="Location" options={[["ncr", "Delhi NCR"], ["gurugram", "Gurugram / Gurgaon"], ["noida", "Noida / Greater Noida"], ["delhi", "Delhi / New Delhi"], ["remote", "Remote"], ["other", "Outside Delhi NCR"]]} selected={filters.location} onChange={(value) => setMultiFilter("location", value)} />
+          <MultiSelect label="Role type" options={[["frontend", "Frontend"], ["backend", "Backend"], ["fullstack", "Full stack"], ["qa", "QA / Testing"], ["mobile", "Mobile"], ["devops", "DevOps / Infrastructure"]]} selected={filters.role} onChange={(value) => setMultiFilter("role", value)} />
+          <MultiSelect label="Source" options={sourceOptions.map((source) => [source, source])} selected={filters.source} onChange={(value) => setMultiFilter("source", value)} />
+          <MultiSelect label="Resume match" options={[["strong", "Strong"], ["stretch", "Stretch"], ["skip", "Low fit"], ["unranked", "Not scored"]]} selected={filters.tier} onChange={(value) => setMultiFilter("tier", value)} />
+          <MultiSelect label="Job type" options={[["job", "Jobs"], ["internship", "Internships"]]} selected={filters.employment} onChange={(value) => setMultiFilter("employment", value)} />
+          <Field label="Sort by">
+            <select className="select" value={filters.sort} onChange={(e) => setFilter("sort", e.target.value)}>
+              <option value="ncr">Delhi NCR first, then match</option>
+              <option value="score">Best match</option>
+              <option value="newest">Newest first</option>
+            </select>
+          </Field>
+        </div>
+        <button className="btn" onClick={() => setFilters({ ...DEFAULT_FEED_FILTERS })}>Reset filters</button>
+        {results.length > 0 && visibleResults.length === 0 && <p role="status" className="text-sm">No jobs match these filters. Reset filters to see all fetched jobs.</p>}
+      </section>
+
       {results.length > 0 && (
         <div className="flex items-baseline justify-between gap-3">
           <h2 className="label">
             {running
               ? "Previous board — this fetch has not landed yet"
-              : `Board · ${results.length} open · ${ranked} scored`}
+              : `Board · ${visibleResults.length} of ${results.length} shown · ${ranked} scored`}
           </h2>
         </div>
       )}
 
       <ul className={`space-y-2 ${running ? "opacity-45" : ""}`}>
-        {results.map((job, i) => (
+        {visibleResults.map((job, i) => (
           <li
             key={job.key.slugKey}
             className="sheet flex gap-4 p-4"

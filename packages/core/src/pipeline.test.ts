@@ -205,3 +205,21 @@ describe("india priority ordering", () => {
     expect(done.results[0]!.locationRaw).toBe("Austin, TX");
   });
 });
+
+it("ranks NCR first under a cap and still returns other locations", async () => {
+  const parse = vi.fn().mockResolvedValue({ rankings: [] });
+  const events = await collect(runFetch({
+    ...base,
+    client: { parse, searchWeb: vi.fn() },
+    rankLimit: 1,
+    sources: [{ kind: "remoteok", run: async () => [
+      { ...job("other|engineer"), company: "Other", locationRaw: "Bangalore", applyUrl: "https://other.example/1" },
+      { ...job("ncr|engineer"), company: "NCR", locationRaw: "Gurgaon", applyUrl: "https://ncr.example/1" },
+    ] }],
+  }));
+  expect(parse.mock.calls[0]?.[0].prompt).toContain("Gurgaon");
+  expect(parse.mock.calls[0]?.[0].prompt).not.toContain("Bangalore");
+  const done = events.at(-1);
+  expect(done?.type).toBe("done");
+  if (done?.type === "done") expect(done.results.map((job) => job.locationRaw)).toEqual(["Gurgaon", "Bangalore"]);
+});

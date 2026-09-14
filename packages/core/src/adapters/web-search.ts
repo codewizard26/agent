@@ -16,6 +16,7 @@ const FoundJobsSchema = z.object({
       /** ISO date if the page stated one, else an empty string. */
       postedAtIso: z.string(),
       sourcePage: z.string(),
+      descriptionText: z.string(),
     }),
   ),
 });
@@ -52,6 +53,7 @@ export function buildSearchQueries(
   const recency = recencyPhrase(timeFrameDays);
 
   return [
+    `${roleOr} jobs (Gurugram OR Gurgaon OR Noida OR Delhi) ${profile.yearsExperience < 2 ? 'fresher "0-2 years"' : stack}${recency}`,
     // LinkedIn and Naukri first — they carry the most India postings of any
     // site here, and they are reachable no other way.
     `site:linkedin.com/jobs ${roleOr} ${stack} India${recency}`,
@@ -62,10 +64,11 @@ export function buildSearchQueries(
     // `site:naukri.com frontend developer jobs`. Quoting the role chain and
     // appending stack terms and a recency phrase over-constrains it to zero.
     `site:naukri.com ${primary} jobs India`,
-    `site:wellfound.com OR site:hirist.tech OR site:cutshort.io ${roleOr} ${stack} India${recency}`,
-    // SkillCareerHub renders its board client-side and its robots.txt disallows
-    // /api/, so the listings are reachable only as pages a search engine has
-    // already indexed — the same route LinkedIn and Naukri take above.
+    `site:wellfound.com OR site:cutshort.io ${roleOr} ${stack} India${recency}`,
+    // Dedicated queries ensure the requested boards are explicitly searched.
+    ...["carrerlift.in", "hirist.tech", "builtin.com", "in.indeed.com", "bebee.com"].map(
+      (domain) => `site:${domain} ${primary} ${profile.yearsExperience < 2 ? '("fresher" OR "0-2 years")' : ""} India${recency}`,
+    ),
     `site:skillcareerhub.com ${primary} jobs India${recency}`,
     `${seniority} ${roleOr} jobs India Bangalore Hyderabad Pune ${stack}${recency}`,
     `remote ${seniority} ${roleOr} jobs ${stack} hiring from India${recency}`,
@@ -87,19 +90,25 @@ export async function fetchViaWebSearch(
   const queries = buildSearchQueries(profile, timeFrameDays);
 
   const findings = await client.searchWeb({
-    maxSearches: 8,
+    maxSearches: queries.length,
     prompt:
       "Search the web for currently-open job postings matching this " +
       `candidate. Run these searches:\n${queries.map((q) => `- ${q}`).join("\n")}\n\n` +
       "For each real posting you find, note the company, exact role title, " +
       "location, whether it is remote, the direct application URL, the date " +
       "it was posted if the page states one, and the page you found it on. " +
+      "Read each posting and retain its required skills, minimum experience, " +
+      "eligibility, and location restrictions as descriptionText. Never invent missing requirements. " +
       "Skip aggregator index pages, listicles, and posts that are not a " +
       "specific open role. Skip anything that is not a software engineering " +
       "role — no sales, solutions, support, recruiting, marketing or " +
       "non-software engineering positions, however well the company matches." +
       "\n\nCANDIDATE\n" +
       `Target roles: ${deriveRoleFamilies(profile).join(", ")}\n` +
+      `Years of experience: ${profile.yearsExperience}\n` +
+      (profile.yearsExperience < 2
+        ? "Include software internships, fresher jobs or explicit experience requirements entirely within 0–2 years. Exclude unknown experience, open-ended requirements and ranges above 2 years. Preserve the exact experience wording.\n"
+        : "") +
       `Target seniority: ${profile.seniorityBands.join(", ")}\n` +
       `Core stack: ${profile.coreStack.join(", ")}`,
   });
@@ -113,7 +122,9 @@ export async function fetchViaWebSearch(
     maxOutputTokens: 16000,
     prompt:
       "Convert these search findings into structured job rows. Use an empty " +
-      "string for postedAtIso when no date was stated — do not guess one.\n\n" +
+      "string for postedAtIso when no date was stated — do not guess one. " +
+      "Preserve actual job requirements in descriptionText; use an empty string " +
+      "if none were found. Never substitute the candidate skills for job requirements.\n\n" +
       findings,
   });
 
@@ -138,13 +149,7 @@ export async function fetchViaWebSearch(
         locationRaw: j.location,
         remote: j.remote,
         locationRestrictions: [],
-        // Empty, not a provenance sentence. A search result carries no job
-        // description, and writing prose here made the row look like it had
-        // one — the stack filter then read that sentence, found no React or
-        // Node in it, and rejected every LinkedIn and Naukri posting on
-        // evidence that was never there. Provenance is already in
-        // `sourceKind` and the apply URL.
-        descriptionText: "",
+        descriptionText: j.descriptionText ?? "",
         applyUrl: j.applyUrl,
         atsKind: null,
         atsRef: null,

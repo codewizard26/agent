@@ -1,4 +1,5 @@
 export type SourceKind =
+  | "carrerlift"
   | "greenhouse"
   | "lever"
   | "ashby"

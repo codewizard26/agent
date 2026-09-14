@@ -43,6 +43,7 @@ export default async function ProfilePage({
     company: row.company,
     title: row.title,
     locationRaw: row.locationRaw,
+    remote: row.remote,
     applyUrl: row.applyUrl,
     sourceKind: row.sourceKind,
     postedAt: row.postedAt?.toISOString() ?? null,

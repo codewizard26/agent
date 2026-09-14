@@ -183,3 +183,41 @@ describe("india priority", () => {
     expect(result.rejected[0]!.reason).toMatch(/outside profile regions/);
   });
 });
+
+describe("resume matching regressions", () => {
+  const candidate = { ...gradProfile, yearsExperience: 0.5, coreStack: ["React.js", "Node.js", "JavaScript"] };
+  function check(title: string, descriptionText: string) {
+    return filterJobs([job({ title, descriptionText: `Experience: 0–2 years. ${descriptionText}` })], candidate, DEFAULT_POSTURE_REMOTE_GLOBAL, base);
+  }
+  it("matches equivalent framework spellings", () => {
+    expect(check("Junior Developer", "Build APIs using React and NodeJS.").passed).toHaveLength(1);
+  });
+  it("does not count Java inside JavaScript or Go inside ongoing", () => {
+    const result = filterJobs([job({ title: "Junior Developer", descriptionText: "JavaScript for ongoing work" })],
+      { ...candidate, coreStack: ["Java", "Go"] }, DEFAULT_POSTURE_REMOTE_GLOBAL, base);
+    expect(result.passed).toHaveLength(0);
+  });
+  it("rejects explicit experience requirements beyond the resume", () => {
+    expect(check("Software Developer", "React, NodeJS. Minimum 5 years experience required.").rejected[0]?.reason).toMatch(/experience/);
+  });
+  it("keeps nearby experience ranges and ignores preferred experience", () => {
+    expect(check("Software Developer", "React, NodeJS. Experience: 1–2 years.").passed).toHaveLength(1);
+    expect(check("Software Developer", "React, NodeJS. 5 years preferred.").passed).toHaveLength(1);
+  });
+  it("does not reject Internal Tools because intern is a rejected title", () => {
+    expect(check("Software Engineer, Internal Tools", "React and NodeJS").passed).toHaveLength(1);
+  });
+});
+
+it("admits relevant internships even with legacy intern exclusions", () => {
+  const result = filterJobs([job({ title: "Frontend Developer Intern", descriptionText: "Build with React." })], gradProfile, DEFAULT_POSTURE_REMOTE_GLOBAL, base);
+  expect(result.passed).toHaveLength(1);
+});
+it("admits a generic software internship without requiring an experienced stack", () => {
+  const result = filterJobs([job({ title: "Software Intern", descriptionText: "Computer science students welcome. Learn with our team." })], gradProfile, DEFAULT_POSTURE_REMOTE_GLOBAL, base);
+  expect(result.passed).toHaveLength(1);
+});
+it("still rejects internships explicitly requiring more than two years", () => {
+  const result = filterJobs([job({ title: "Software Intern", descriptionText: "Requires 3 years experience. React and Node.js." })], gradProfile, DEFAULT_POSTURE_REMOTE_GLOBAL, base);
+  expect(result.passed).toHaveLength(0);
+});

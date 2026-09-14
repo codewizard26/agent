@@ -119,3 +119,29 @@ describe("fetchViaWebSearch", () => {
     expect(await fetchViaWebSearch(profile, 7, client)).toEqual([]);
   });
 });
+
+describe("expanded discovery", () => {
+  it("gives each requested board a dedicated query", () => {
+    const queries = buildSearchQueries(profile, 30);
+    for (const domain of ["carrerlift.in", "hirist.tech", "builtin.com", "in.indeed.com", "bebee.com"]) {
+      expect(queries.filter((query) => query.startsWith(`site:${domain} `))).toHaveLength(1);
+    }
+  });
+  it("derives frontend and backend roles from resume framework aliases", () => {
+    const queries = buildSearchQueries({ ...profile, coreStack: ["React.js", "Node.js"], bonusStack: [] }, null);
+    expect(queries.join(" ")).toContain('"full stack developer"');
+  });
+  it("retains posting requirements and allows enough searches for every query", async () => {
+    const client = {
+      searchWeb: vi.fn().mockResolvedValue("Verified posting requirements"),
+      parse: vi.fn().mockResolvedValue({ jobs: [{
+        company: "Example", title: "Developer", location: "India", remote: false,
+        applyUrl: "https://builtin.com/job/example/123", postedAtIso: "", sourcePage: "https://builtin.com/job/example/123",
+        descriptionText: "Minimum 5 years. React and Node.js required.",
+      }] }),
+    };
+    const result = await fetchViaWebSearch(profile, null, client);
+    expect(result[0]?.descriptionText).toContain("Minimum 5 years");
+    expect(client.searchWeb.mock.calls[0]?.[0].maxSearches).toBe(buildSearchQueries(profile, null).length);
+  });
+});

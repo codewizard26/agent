@@ -1,4 +1,5 @@
 import type { ParsedProfile } from "./resume.js";
+import { canonicalStack } from "./stack.js";
 
 /**
  * Which *kind of job* this is, as opposed to how senior it is.
@@ -13,6 +14,8 @@ import type { ParsedProfile } from "./resume.js";
 
 /** Titles that name a software engineering role. */
 const ROLE_TERMS = [
+  "software intern",
+  "software engineering intern",
   "software engineer",
   "software developer",
   "software development engineer",
@@ -134,7 +137,8 @@ const NON_ENGINEERING_PATTERNS = NON_ENGINEERING_TERMS.map(pattern);
  * role by any text measure, and the title is the one field that does not lie.
  */
 export function isEngineeringRole(title: string): boolean {
-  if (NON_ENGINEERING_PATTERNS.some((p) => p.test(title))) return false;
+  const checkedTitle = /frontend|front.end|web developer/i.test(title) ? title.replace(/\b(?:ui\/ux )?designer\b/gi, "") : title;
+  if (NON_ENGINEERING_PATTERNS.some((p) => p.test(checkedTitle))) return false;
   return ROLE_PATTERNS.some((p) => p.test(title));
 }
 
@@ -178,7 +182,7 @@ const BACKEND_STACK = [
 ];
 
 function hasAny(stack: string[], terms: string[]): boolean {
-  const lower = stack.map((s) => s.toLowerCase());
+  const lower = stack.flatMap((s) => s.split("/")).map(canonicalStack);
   return terms.some((t) => lower.some((s) => s === t || s.startsWith(`${t} `)));
 }
 

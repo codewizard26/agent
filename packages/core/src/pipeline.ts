@@ -2,6 +2,7 @@ import { dedupeJobs, mapWithConcurrency } from "./adapters/index.js";
 import type { LlmClient } from "./llm.js";
 import { filterJobs } from "./filter.js";
 import { isIndiaLocated, sortByIndiaPriority } from "./india.js";
+import { isPreferredLocation } from "./location-priority.js";
 import { rankJobs, type RankedJob } from "./rank.js";
 import type { ParsedProfile, Posture } from "./resume.js";
 import type { NormalizedJob, SourceKind } from "./types.js";
@@ -24,7 +25,7 @@ export interface RankedResult extends NormalizedJob {
 export type ProgressEvent =
   | { type: "fetching"; sources: number }
   | { type: "fetched"; total: number; deduped: number; failed: SourceKind[] }
-  | { type: "filtered"; kept: number; rejected: number }
+  | { type: "filtered"; kept: number; rejected: number; reasons?: Record<string, number>; sourceCounts?: Record<string, number> }
   | { type: "ranking"; jobs: number }
   | { type: "done"; results: RankedResult[]; failed: SourceKind[] }
   | { type: "error"; message: string };
@@ -168,11 +169,16 @@ export async function* runFetch(
   };
 
   const { jobs: passed, rejected, failed } = candidates;
-  yield { type: "filtered", kept: passed.length, rejected: rejected.length };
+  const reasons: Record<string, number> = {};
+  for (const entry of rejected) reasons[entry.reason] = (reasons[entry.reason] ?? 0) + 1;
+  const sourceCounts: Record<string, number> = {};
+  for (const job of passed) sourceCounts[job.sourceKind] = (sourceCounts[job.sourceKind] ?? 0) + 1;
+  yield { type: "filtered", kept: passed.length, rejected: rejected.length, reasons, sourceCounts };
 
   // The cap has to choose which jobs get ranked before anything is scored, so it
   // uses the one ordering available without a model: India priority.
-  const ordered = opts.posture.indiaPriority ? sortByIndiaPriority(passed) : passed;
+  const ordered = [...(opts.posture.indiaPriority ? sortByIndiaPriority(passed) : passed)]
+    .sort((a, b) => Number(isPreferredLocation(b.locationRaw)) - Number(isPreferredLocation(a.locationRaw)));
   const toRank =
     opts.rankLimit != null ? ordered.slice(0, opts.rankLimit) : ordered;
 
@@ -191,6 +197,7 @@ export async function* runFetch(
     .map((job) => ({ ...job, rank: rankings.get(job.key.slugKey) ?? null }))
     .sort(
       (a, b) =>
+        Number(isPreferredLocation(b.locationRaw)) - Number(isPreferredLocation(a.locationRaw)) ||
         indiaRank(b) - indiaRank(a) ||
         (b.rank?.score ?? -1) - (a.rank?.score ?? -1),
     );

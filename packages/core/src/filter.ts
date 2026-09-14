@@ -3,6 +3,8 @@ import { isEngineeringRole } from "./roles.js";
 import { ledgerMatchKeys } from "./job-key.js";
 import type { ParsedProfile, Posture } from "./resume.js";
 import type { NormalizedJob } from "./types.js";
+import { containsTerm, stackMatchCount } from "./stack.js";
+import { hasFresherRequirements } from "./experience.js";
 
 export interface FilterOptions {
   now: Date;
@@ -40,13 +42,11 @@ function haystack(job: NormalizedJob): string {
 }
 
 function countStackMatches(job: NormalizedJob, stack: string[]): number {
-  const text = haystack(job).toLowerCase();
-  return stack.filter((tech) => text.includes(tech.toLowerCase())).length;
+  return stackMatchCount(haystack(job), stack);
 }
 
 function matchesAny(text: string, keywords: string[]): boolean {
-  const lower = text.toLowerCase();
-  return keywords.some((k) => lower.includes(k.toLowerCase()));
+  return keywords.some((k) => containsTerm(text, k));
 }
 
 export function filterJobs(
@@ -81,7 +81,10 @@ export function filterJobs(
     }
 
     // Seniority — derived from the profile's own bands, never a fixed list.
-    if (matchesAny(job.title, profile.titlesReject)) {
+    const rejectedTitles = profile.yearsExperience < 2
+      ? profile.titlesReject.filter((title) => !/^(intern|internship)$/i.test(title))
+      : profile.titlesReject;
+    if (matchesAny(job.title, rejectedTitles)) {
       reject("seniority band mismatch");
       continue;
     }
@@ -96,6 +99,18 @@ export function filterJobs(
     }
 
     const text = haystack(job);
+    if (profile.yearsExperience < 2 && !hasFresherRequirements(job.title, job.descriptionText)) {
+      reject("requires explicit fresher or 0–2 years experience requirements");
+      continue;
+    }
+    // Only explicit required minima, never incidental numbers or preferred years.
+    const requiredYears = [...job.descriptionText.matchAll(
+      /(?:minimum(?: of)?|at least|requires?|experience\s*:)\s*(\d+)\s*(?:\+|[-–]\s*\d+)?\s*years?\b/gi,
+    )].map((match) => Number(match[1]));
+    if (requiredYears.some((years) => years > Math.ceil(profile.yearsExperience) + 1)) {
+      reject("required experience exceeds resume experience");
+      continue;
+    }
     if (!posture.needsSponsorship && AUTHORIZATION_GATES.some((r) => r.test(text))) {
       reject("geography or work-authorization gate");
       continue;
@@ -140,8 +155,10 @@ export function filterJobs(
     // it is a test it cannot take. Absent evidence, the role and seniority
     // gates above stand on their own and the ranker scores the rest — the same
     // rule `isIndiaEligible` follows for an empty restriction list.
-    if (job.descriptionText.trim() !== "" && countStackMatches(job, profile.coreStack) < 2) {
-      reject("fewer than 2 core stack matches");
+    const minimumStackMatches = profile.yearsExperience < 2 ? 1 : 2;
+    const generalEntryRole = profile.yearsExperience < 2 && /\b(software|sde|swe)\b/i.test(job.title);
+    if (job.descriptionText.trim() !== "" && !generalEntryRole && countStackMatches(job, profile.coreStack) < minimumStackMatches) {
+      reject(`fewer than ${minimumStackMatches} core stack matches`);
       continue;
     }
 

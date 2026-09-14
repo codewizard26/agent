@@ -87,3 +87,13 @@ describe("rankJobs", () => {
     expect(result.size).toBe(0);
   });
 });
+
+it("never labels missing job requirements a verified strong match", async () => {
+  const client = {
+    parse: vi.fn().mockResolvedValue({ rankings: [ranked("acme|a", 95)] }),
+    searchWeb: vi.fn(),
+  } as never;
+  const result = await rankJobs([{ ...job("acme|a"), descriptionText: "" }], profile, client);
+  expect(result.get("acme|a")).toMatchObject({ score: 50, tier: "stretch", resumeHooks: [] });
+  expect(result.get("acme|a")?.redFlags).toContain("Job requirements unavailable; match unverified");
+});

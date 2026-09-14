@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { deriveRoleFamilies } from "./roles.js";
 import type { LlmClient } from "./llm.js";
 import type { ParsedProfile } from "./resume.js";
 import type { NormalizedJob } from "./types.js";
@@ -28,8 +29,11 @@ export function profileBrief(profile: ParsedProfile): string {
   return [
     `Name: ${profile.fullName}`,
     `Years of experience: ${profile.yearsExperience}`,
+    ...(profile.yearsExperience < 2 ? ["Include relevant internships and fresher roles; internship experience requirements must not exceed two years."] : []),
     `Target seniority: ${profile.seniorityBands.join(", ")}`,
     `Core stack: ${profile.coreStack.join(", ")}`,
+    `Target roles: ${deriveRoleFamilies(profile).join(", ")}`,
+    `Rejected titles: ${profile.titlesReject.filter((title) => profile.yearsExperience >= 2 || !/^(intern|internship)$/i.test(title)).join(", ")}`,
     `Bonus differentiators: ${profile.bonusStack.join(", ") || "none"}`,
   ].join("\n");
 }
@@ -83,7 +87,11 @@ export async function rankJobs(
         maxOutputTokens: 48000,
         system:
           "You rank job postings against one candidate's profile. Score 0-100 on " +
-          "fit. Set sponsorshipGate true when the posting implies work " +
+          "fit. Compare required experience and primary role skills against the resume. " +
+          "Missing descriptions are unverified: cap score at 50 and tier at stretch, " +
+          "and flag missing requirements. Never infer skills from company or title alone. " +
+          "Set tier skip for incompatible roles or required experience above the candidate level. " +
+          "Set sponsorshipGate true when the posting implies work " +
           "authorization the candidate does not have — the language for this is " +
           "varied, so read for intent, not keywords. Bonus differentiators should " +
           "raise a score but never be treated as a requirement.\n\n" +
@@ -112,7 +120,17 @@ export async function rankJobs(
       );
       continue;
     }
-    for (const ranking of result.value) out.set(ranking.jobKey, ranking);
+    for (const ranking of result.value) {
+      const job = jobs.find((job) => job.key.slugKey === ranking.jobKey);
+      if (!job) continue;
+      if (!job.descriptionText.trim()) {
+        ranking.score = Math.min(ranking.score, 50);
+        if (ranking.tier === "strong") ranking.tier = "stretch";
+        ranking.redFlags = [...ranking.redFlags, "Job requirements unavailable; match unverified"];
+        ranking.resumeHooks = [];
+      }
+      out.set(ranking.jobKey, ranking);
+    }
   }
 
   if (failures.length > 0) {
