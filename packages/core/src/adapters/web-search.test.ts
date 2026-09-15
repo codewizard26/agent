@@ -121,10 +121,11 @@ describe("fetchViaWebSearch", () => {
 });
 
 describe("expanded discovery", () => {
-  it("gives each requested board a dedicated query", () => {
+  it("leaves direct boards out of indexed discovery", () => {
     const queries = buildSearchQueries(profile, 30);
-    for (const domain of ["carrerlift.in", "hirist.tech", "builtin.com", "in.indeed.com", "bebee.com"]) {
-      expect(queries.filter((query) => query.startsWith(`site:${domain} `))).toHaveLength(1);
+    expect(queries.filter((query) => query.startsWith("site:hirist.tech "))).toHaveLength(1);
+    for (const domain of ["carrerlift.in", "builtin.com", "in.indeed.com", "bebee.com"]) {
+      expect(queries.filter((query) => query.startsWith(`site:${domain} `))).toHaveLength(0);
     }
   });
   it("derives frontend and backend roles from resume framework aliases", () => {

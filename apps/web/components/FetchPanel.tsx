@@ -261,6 +261,7 @@ export function FetchPanel({
               ...l,
               `${event.total} postings, ${event.deduped} after dedup` +
                 (event.failed.length ? ` (${event.failed.join(", ")} failed)` : ""),
+              ...(event.failures ?? []).map((failure: { source: string; message: string }) => `${failure.source}: ${failure.message}`),
             ]);
           } else if (event.type === "filtered") {
             setLog((l) => [
@@ -411,7 +412,7 @@ export function FetchPanel({
             </a>
           ))}
           <span className="text-[12px] text-ink-soft">
-            Carrerlift is fetched directly. Other boards use indexed postings. Sign-in-only listings require manual browsing.
+            Carrerlift, Built In, Indeed and beBee use direct fetching. Hirist uses indexed search. Access blocks and source failures appear in the fetch log; gated listings may require manual browsing.
           </span>
         </div>
       )}

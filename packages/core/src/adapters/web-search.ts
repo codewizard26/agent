@@ -65,10 +65,7 @@ export function buildSearchQueries(
     // appending stack terms and a recency phrase over-constrains it to zero.
     `site:naukri.com ${primary} jobs India`,
     `site:wellfound.com OR site:cutshort.io ${roleOr} ${stack} India${recency}`,
-    // Dedicated queries ensure the requested boards are explicitly searched.
-    ...["carrerlift.in", "hirist.tech", "builtin.com", "in.indeed.com", "bebee.com"].map(
-      (domain) => `site:${domain} ${primary} ${profile.yearsExperience < 2 ? '("fresher" OR "0-2 years")' : ""} India${recency}`,
-    ),
+    `site:hirist.tech ${primary} jobs India${recency}`,
     `site:skillcareerhub.com ${primary} jobs India${recency}`,
     `${seniority} ${roleOr} jobs India Bangalore Hyderabad Pune ${stack}${recency}`,
     `remote ${seniority} ${roleOr} jobs ${stack} hiring from India${recency}`,
@@ -92,6 +89,7 @@ export async function fetchViaWebSearch(
   const findings = await client.searchWeb({
     maxSearches: queries.length,
     prompt:
+      "Do not search Carrerlift, Built In, Indeed or beBee: dedicated direct sources handle those boards. " +
       "Search the web for currently-open job postings matching this " +
       `candidate. Run these searches:\n${queries.map((q) => `- ${q}`).join("\n")}\n\n` +
       "For each real posting you find, note the company, exact role title, " +

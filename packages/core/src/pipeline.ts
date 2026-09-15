@@ -24,7 +24,7 @@ export interface RankedResult extends NormalizedJob {
 
 export type ProgressEvent =
   | { type: "fetching"; sources: number }
-  | { type: "fetched"; total: number; deduped: number; failed: SourceKind[] }
+  | { type: "fetched"; total: number; deduped: number; failed: SourceKind[]; failures?: { source: SourceKind; message: string }[] }
   | { type: "filtered"; kept: number; rejected: number; reasons?: Record<string, number>; sourceCounts?: Record<string, number> }
   | { type: "ranking"; jobs: number }
   | { type: "done"; results: RankedResult[]; failed: SourceKind[] }
@@ -57,6 +57,7 @@ export interface CandidateSet {
   stats: { fetched: number; deduped: number; kept: number };
   /** True when no source returned anything — an error, not an empty feed. */
   allSourcesFailed: boolean;
+  failures: { source: SourceKind; message: string }[];
 }
 
 export interface CollectOptions {
@@ -114,9 +115,13 @@ export async function collectCandidates(
 
   const collected: NormalizedJob[] = [];
   const failed: SourceKind[] = [];
+  const failures: { source: SourceKind; message: string }[] = [];
   settled.forEach((result, i) => {
     if (result.status === "fulfilled") collected.push(...result.value);
-    else failed.push(opts.sources[i]!.kind);
+    else {
+      failed.push(opts.sources[i]!.kind);
+      failures.push({ source: opts.sources[i]!.kind, message: result.reason instanceof Error ? result.reason.message : "Source request failed" });
+    }
   });
 
   const allSourcesFailed =
@@ -139,6 +144,7 @@ export async function collectCandidates(
       kept: passed.length,
     },
     allSourcesFailed,
+    failures,
   };
 }
 
@@ -166,6 +172,7 @@ export async function* runFetch(
     total: candidates.stats.fetched,
     deduped: candidates.stats.deduped,
     failed: candidates.failed,
+    failures: candidates.failures,
   };
 
   const { jobs: passed, rejected, failed } = candidates;

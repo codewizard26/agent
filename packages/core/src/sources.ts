@@ -1,3 +1,4 @@
+import { fetchPublicBoard } from "./adapters/public-boards.js";
 import { fetchCarrerlift } from "./adapters/carrerlift.js";
 import type { BoardsConfig } from "./adapters/index.js";
 import type { LlmClient } from "./llm.js";
@@ -93,6 +94,7 @@ export function buildSources(opts: BuildSourcesOptions): SourceTask[] {
     opts.maxBoards == null ? tokens : tokens.slice(0, opts.maxBoards);
 
   const sources: SourceTask[] = [
+    ...(["builtin", "bebee", "indeed"] as const).map((kind) => ({ kind, timeoutMs: 110_000, run: () => fetchPublicBoard(kind) })),
     { kind: "carrerlift", timeoutMs: 120_000, run: () => fetchCarrerlift(profile) },
     ...cap(boards.greenhouse).map((token) => ({
       kind: "greenhouse" as const,
