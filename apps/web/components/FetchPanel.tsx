@@ -503,7 +503,41 @@ export function FetchPanel({
               <div className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] text-ink-soft">
                 <span>{job.locationRaw}</span>
                 <span className="text-rule">/</span>
-                <span>{job.sourceKind}</span>
+                {job.sourceKind === "himalayas" ? (
+                  <a href="https://himalayas.app/jobs" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                    Himalayas
+                  </a>
+                ) : job.sourceKind === "arbeitnow" ? (
+                  <a href="https://www.arbeitnow.com" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                    Arbeitnow
+                  </a>
+                ) : job.sourceKind === "remotefirstjobs" ? (
+                  <a href="https://remotefirstjobs.com" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                    Remote First Jobs
+                  </a>
+                ) : job.sourceKind === "careerjet" ? (
+                  <a href="https://www.careerjet.co.in" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                    Careerjet
+                  </a>
+                ) : job.sourceKind === "indianapi" ? (
+                  <a href="https://indianapi.in/jobs-api" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                    IndianAPI
+                  </a>
+                ) : job.sourceKind === "offcampusjobs4u" ? (
+                  <a href="https://offcampusjobs4u.com" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                    OffCampusJobs4u
+                  </a>
+                ) : job.sourceKind === "hasjob" ? (
+                  <a href="https://hasjob.co" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                    Hasjob
+                  </a>
+                ) : job.sourceKind === "jobtankindia" ? (
+                  <a href="https://www.jobtankindia.com" target="_blank" rel="noreferrer" className="underline underline-offset-2">
+                    Job Tank India
+                  </a>
+                ) : (
+                  <span>{job.sourceKind}</span>
+                )}
                 <span className="text-rule">/</span>
                 <span className="inline-flex items-center gap-1.5">
                   <FidelityMark fidelity={job.dateFidelity} />

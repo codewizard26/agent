@@ -21,11 +21,17 @@ export async function POST(request: Request): Promise<Response> {
   };
 
   const db = createDb();
+  const requestUrl = new URL(request.url);
+  const userIp = request.headers.get("x-real-ip") ?? request.headers.get("x-forwarded-for")?.split(",")[0]?.trim();
   const prepared = await prepareFetch(db, profileId, {
     timeFrameDays,
     rankLimit,
     maxBoards,
     skipModelSources,
+  }, {
+    userIp: userIp ?? "",
+    userAgent: request.headers.get("user-agent") ?? "",
+    referer: new URL(`/profiles/${encodeURIComponent(profileId)}`, requestUrl).href,
   });
   if (!prepared) return new Response("profile not found", { status: 404 });
 

@@ -35,11 +35,10 @@ function recencyPhrase(timeFrameDays: number | null): string {
  * not. The queries used to hardcode "full stack developer", which is one
  * person's title, and is why the results drifted off what the resume says.
  *
- * The `site:` queries are the whole point of this adapter. LinkedIn, Naukri,
- * Wellfound, Foundit, Cutshort, Hirist and SkillCareerHub all refuse programmatic access
- * (401/403/404/406) and forbid scraping, so their postings are reached the way
- * design §3 reaches X: as pages a search engine has already indexed. Nothing
- * here logs into anything or fetches those sites directly.
+ * The `site:` queries reach boards without an open search API through pages a
+ * search engine has indexed. This can surface relevant postings, but it cannot
+ * guarantee complete coverage. Nothing here logs into a board or fetches those
+ * sites directly.
  */
 export function buildSearchQueries(
   profile: ParsedProfile,
@@ -54,9 +53,10 @@ export function buildSearchQueries(
 
   return [
     `${roleOr} jobs (Gurugram OR Gurgaon OR Noida OR Delhi) ${profile.yearsExperience < 2 ? 'fresher "0-2 years"' : stack}${recency}`,
-    // LinkedIn and Naukri first — they carry the most India postings of any
-    // site here, and they are reachable no other way.
-    `site:linkedin.com/jobs ${roleOr} ${stack} India${recency}`,
+    // Search the largest India boards separately with broad terms: long OR
+    // chains plus stack requirements tend to hide otherwise relevant results.
+    `site:linkedin.com/jobs ${primary} jobs India ${stack}${recency}`,
+    `site:linkedin.com/jobs ${roleOr} India${recency}`,
     // Naukri gets a deliberately loose query. Its listing pages are thinly
     // indexed — a probe on 2026-08-31 returned nothing for
     // `site:naukri.com "software engineer" India` and nothing for a
@@ -64,11 +64,16 @@ export function buildSearchQueries(
     // `site:naukri.com frontend developer jobs`. Quoting the role chain and
     // appending stack terms and a recency phrase over-constrains it to zero.
     `site:naukri.com ${primary} jobs India`,
+    `site:naukri.com/job-listings ${roleOr} (Bengaluru OR Bangalore OR Hyderabad OR Pune OR Gurgaon OR Noida)${recency}`,
+    `site:glassdoor.co.in/Job OR site:glassdoor.com/Job ${primary} India${recency}`,
+    `site:in.indeed.com/viewjob OR site:in.indeed.com/jobs ${primary} India${recency}`,
+    `site:dice.com/job-detail OR site:ziprecruiter.com/jobs ${primary} India remote${recency}`,
     `site:wellfound.com OR site:cutshort.io ${roleOr} ${stack} India${recency}`,
     `site:hirist.tech ${primary} jobs India${recency}`,
-    `site:skillcareerhub.com ${primary} jobs India${recency}`,
+    `site:foundit.in OR site:timesjobs.com OR site:shine.com OR site:freshersworld.com ${primary} jobs India${recency}`,
     `${seniority} ${roleOr} jobs India Bangalore Hyderabad Pune ${stack}${recency}`,
-    `remote ${seniority} ${roleOr} jobs ${stack} hiring from India${recency}`,
+    `remote ${seniority} ${roleOr} jobs ${stack} (India OR worldwide OR "work from anywhere")${recency}`,
+    `site:weworkremotely.com OR site:remote.co OR site:remotive.com ${primary} remote (India OR worldwide OR "work from anywhere")${recency}`,
     `site:x.com OR site:twitter.com "we're hiring" OR "we are hiring" ${primary} ${stack}${recency}`,
     `"now hiring" ${primary} ${stack} apply${recency}`,
   ];

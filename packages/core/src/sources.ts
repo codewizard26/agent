@@ -29,6 +29,10 @@ import {
   parseHnComment,
 } from "./adapters/hn.js";
 import { fetchViaWebSearch } from "./adapters/web-search.js";
+import { fetchCareerjet, type CareerjetAccess } from "./adapters/careerjet.js";
+import { fetchRemoteFirstJobs } from "./adapters/remote-first-jobs.js";
+import { fetchIndianApi } from "./adapters/indianapi.js";
+import { fetchIndiaCommunityJobs } from "./adapters/india-community.js";
 import {
   createBlueskySession,
   searchBlueskyPosts,
@@ -47,6 +51,8 @@ export interface BuildSourcesOptions {
    */
   client?: LlmClient;
   bluesky?: { identifier: string; appPassword: string };
+  careerjet?: CareerjetAccess;
+  indianApiKey?: string;
   /** Cap on company board tokens per provider. Omit to use every token. */
   maxBoards?: number;
   /**
@@ -123,6 +129,8 @@ export function buildSources(opts: BuildSourcesOptions): SourceTask[] {
     },
     {
       kind: "arbeitnow" as const,
+      // Pagination is sequential and capped at ten pages (up to 1,750 jobs).
+      timeoutMs: 125_000,
       run: async (): Promise<NormalizedJob[]> =>
         (await fetchArbeitnow()).map(normalizeArbeitnow),
     },
@@ -133,6 +141,9 @@ export function buildSources(opts: BuildSourcesOptions): SourceTask[] {
     },
     {
       kind: "himalayas" as const,
+      // Their current API caps each response at 20; follow cursor pagination
+      // for up to ten pages and keep the refresh bounded.
+      timeoutMs: 125_000,
       run: async (): Promise<NormalizedJob[]> =>
         (await fetchHimalayas()).map(normalizeHimalayas),
     },
@@ -141,7 +152,42 @@ export function buildSources(opts: BuildSourcesOptions): SourceTask[] {
       run: async (): Promise<NormalizedJob[]> =>
         (await fetchJobicy()).map(normalizeJobicy),
     },
+    {
+      kind: "remotefirstjobs" as const,
+      run: (): Promise<NormalizedJob[]> => fetchRemoteFirstJobs(profile),
+    },
+    {
+      kind: "offcampusjobs4u" as const,
+      timeoutMs: 25_000,
+      run: () => fetchIndiaCommunityJobs("offcampusjobs4u"),
+    },
+    {
+      kind: "hasjob" as const,
+      timeoutMs: 25_000,
+      run: () => fetchIndiaCommunityJobs("hasjob"),
+    },
+    {
+      kind: "jobtankindia" as const,
+      timeoutMs: 130_000,
+      run: () => fetchIndiaCommunityJobs("jobtankindia"),
+    },
   ];
+
+  if (opts.careerjet) {
+    sources.push({
+      kind: "careerjet",
+      timeoutMs: 150_000,
+      run: () => fetchCareerjet(profile, opts.careerjet!),
+    });
+  }
+
+  if (opts.indianApiKey) {
+    sources.push({
+      kind: "indianapi",
+      timeoutMs: 25_000,
+      run: () => fetchIndianApi(opts.indianApiKey!),
+    });
+  }
 
   // Ashby and Instahyre expose no post date, so they only join an unbounded
   // fetch. Instahyre is the largest India-native source (~13k roles) and this

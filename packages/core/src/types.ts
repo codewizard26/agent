@@ -3,6 +3,8 @@ export type SourceKind =
   | "bebee"
   | "indeed"
   | "carrerlift"
+  | "careerjet"
+  | "indianapi"
   | "greenhouse"
   | "lever"
   | "ashby"
@@ -15,6 +17,10 @@ export type SourceKind =
   | "himalayas"
   | "jobicy"
   | "instahyre"
+  | "remotefirstjobs"
+  | "offcampusjobs4u"
+  | "hasjob"
+  | "jobtankindia"
   | "ycombinator";
 
 export type AtsKind = "greenhouse" | "lever" | "ashby" | "workable";

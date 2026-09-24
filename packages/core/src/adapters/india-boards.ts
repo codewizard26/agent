@@ -94,11 +94,29 @@ export function normalizeHimalayas(raw: HimalayasJob): NormalizedJob {
   };
 }
 
-export async function fetchHimalayas(): Promise<HimalayasJob[]> {
-  const res = await fetch("https://himalayas.app/jobs/api?limit=200");
-  if (!res.ok) throw new Error(`himalayas: HTTP ${res.status}`);
-  const body = (await res.json()) as { jobs?: HimalayasJob[] };
-  return body.jobs ?? [];
+const HIMALAYAS_MAX_PAGES = 10;
+
+export async function fetchHimalayas(maxPages = HIMALAYAS_MAX_PAGES): Promise<HimalayasJob[]> {
+  const jobs: HimalayasJob[] = [];
+  let cursor: string | null = null;
+  const pageLimit = Math.max(1, Math.min(HIMALAYAS_MAX_PAGES, Math.floor(maxPages)));
+
+  for (let page = 0; page < pageLimit; page += 1) {
+    const url = new URL("https://himalayas.app/jobs/api");
+    url.searchParams.set("limit", "20");
+    if (cursor) url.searchParams.set("cursor", cursor);
+    const res = await fetch(url, { signal: AbortSignal.timeout(12_000) });
+    if (!res.ok) throw new Error(`himalayas: HTTP ${res.status}`);
+    const body = (await res.json()) as {
+      jobs?: HimalayasJob[];
+      nextCursor?: string | null;
+    };
+    jobs.push(...(body.jobs ?? []));
+    cursor = body.nextCursor ?? null;
+    if (!cursor) break;
+  }
+
+  return jobs;
 }
 
 /* -------------------------------------------------------------------- Jobicy */
@@ -140,7 +158,11 @@ export function normalizeJobicy(raw: JobicyJob): NormalizedJob {
 }
 
 export async function fetchJobicy(): Promise<JobicyJob[]> {
-  const res = await fetch("https://jobicy.com/api/v2/remote-jobs?count=50");
+  // Ask Jobicy for roles whose remote eligibility includes India instead of
+  // downloading an arbitrary slice of its global feed and filtering afterward.
+  const res = await fetch(
+    "https://jobicy.com/api/v2/remote-jobs?count=200&geo=india",
+  );
   if (!res.ok) throw new Error(`jobicy: HTTP ${res.status}`);
   const body = (await res.json()) as { jobs?: JobicyJob[] };
   return body.jobs ?? [];

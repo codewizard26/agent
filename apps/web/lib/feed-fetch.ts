@@ -11,6 +11,7 @@ import {
   type SourceTask,
   type ParsedProfile,
   type Posture,
+  type CareerjetAccess,
 } from "@job-agent/core";
 
 import { resolveBoardsPath } from "./boards-path";
@@ -48,6 +49,7 @@ export async function prepareFetch(
   db: ReturnType<typeof createDb>,
   profileId: string,
   preset: FetchPreset,
+  requestContext?: Pick<CareerjetAccess, "userIp" | "userAgent" | "referer">,
 ): Promise<PreparedFetch | null> {
   const [row] = await db.select().from(profiles).where(eq(profiles.id, profileId));
   if (!row) return null;
@@ -78,6 +80,14 @@ export async function prepareFetch(
       profile,
       timeFrameDays: preset.timeFrameDays,
       client,
+      indianApiKey: process.env.INDIANAPI_JOBS_API_KEY,
+      careerjet:
+        process.env.CAREERJET_API_KEY && requestContext?.userIp && requestContext.userAgent
+          ? {
+              apiKey: process.env.CAREERJET_API_KEY,
+              ...requestContext,
+            }
+          : undefined,
       maxBoards: preset.maxBoards ?? undefined,
       skipModelSources: preset.skipModelSources,
       bluesky:
